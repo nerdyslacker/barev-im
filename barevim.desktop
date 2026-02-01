@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Barev IM
+Exec=/usr/bin/barevim
+Icon=barevim
+Categories=Network;Chat;
+Terminal=false
