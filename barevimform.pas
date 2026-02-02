@@ -6,7 +6,8 @@ interface
 
 uses
   Classes, SysUtils, Forms, Controls, Graphics, Dialogs, StdCtrls, ExtCtrls,
-  ComCtrls, Menus, Barev, BarevTypes, IniFiles, Contnrs;
+  ComCtrls, Menus, Barev, BarevTypes,
+  BarevIMTypes, BarevIMConfig, BarevIMChat, BarevIMContacts;
 
 type
 
@@ -16,7 +17,6 @@ type
     ButtonConnect: TButton;
     ButtonSend: TButton;
     ButtonAddBuddy: TButton;
-    ButtonRemoveBuddy: TButton;
     EditMessage: TEdit;
     EditMyNick: TEdit;
     EditMyIPv6: TEdit;
@@ -25,48 +25,49 @@ type
     LabelMyIPv6: TLabel;
     LabelMyPort: TLabel;
     LabelBuddies: TLabel;
-    LabelChat: TLabel;
     ListBoxBuddies: TListBox;
-    MemoChat: TMemo;
     MemoLog: TMemo;
-    PageControl1: TPageControl;
+    PageControlChats: TPageControl;
     Panel1: TPanel;
     Panel2: TPanel;
     Panel3: TPanel;
     Panel4: TPanel;
     Splitter1: TSplitter;
-    TabSheetChat: TTabSheet;
-    TabSheetLog: TTabSheet;
     Timer1: TTimer;
+    PopupMenuBuddy: TPopupMenu;
+    MenuItemRemoveBuddy: TMenuItem;
+    
     procedure ButtonAddBuddyClick(Sender: TObject);
-    procedure ButtonRemoveBuddyClick(Sender: TObject);
+    procedure MenuItemRemoveBuddyClick(Sender: TObject);
     procedure ButtonConnectClick(Sender: TObject);
     procedure ButtonSendClick(Sender: TObject);
     procedure EditMessageKeyPress(Sender: TObject; var Key: char);
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
     procedure ListBoxBuddiesDblClick(Sender: TObject);
+    procedure PageControlChatsCloseTabClicked(Sender: TObject);
     procedure Timer1Timer(Sender: TObject);
   private
     FClient: TBarevClient;
     FConnected: Boolean;
     FCurrentBuddy: TBarevBuddy;
-    FConfigFile: string;
-    FChatHistory: TFPHashList;
+
+    FConfig: TBarevConfig;
+    FChatManager: TChatTabManager;
+    FContactManager: TContactManager;
+
     procedure OnMessageReceived(Buddy: TBarevBuddy; const MessageText: string);
     procedure OnBuddyStatus(Buddy: TBarevBuddy; OldStatus, NewStatus: TBuddyStatus);
     procedure OnLog(const LogLevel, Message: string);
-    procedure UpdateBuddyList;
-    procedure AddChatMessage(const Nick, Message: string; Incoming: Boolean);
-    procedure LoadChatHistory(const BuddyJID: string);
-    procedure SaveChatMessage(const BuddyJID, Nick, Message: string; Incoming: Boolean);
-    procedure ClearAllChatHistory;
-    procedure LoadConfig;
-    procedure SaveConfig;
-    procedure LoadBuddies;
-    procedure SaveBuddies;
-  public
 
+    procedure OnContactLog(const Message: string);
+
+    procedure UpdateBuddyList;
+    procedure ApplyConfigToUI;
+    procedure ApplyUIToConfig;
+    procedure SetConnectedState(Connected: Boolean);
+    procedure LogMessage(const Message: string);
+  public
   end;
 
 var
@@ -80,67 +81,121 @@ implementation
 
 procedure TFormMain.FormCreate(Sender: TObject);
 var
-  I: Integer;
-  ConfigParam: string;
+  ConfigPath: string;
 begin
   FConnected := False;
   FClient := nil;
   FCurrentBuddy := nil;
-  FChatHistory := TFPHashList.Create;
 
-  ConfigParam := '';
-  for I := 1 to ParamCount do
-  begin
-    if (Pos('--config=', ParamStr(I)) = 1) then
-    begin
-      ConfigParam := Copy(ParamStr(I), 10, Length(ParamStr(I)));
-      Break;
-    end;
-  end;
+  ConfigPath := DetermineConfigFilePath;
+  FConfig := TBarevConfig.Create(ConfigPath);
+  FChatManager := TChatTabManager.Create(PageControlChats);
+  FContactManager := nil;
 
-  if ConfigParam <> '' then
-  begin
-    FConfigFile := ConfigParam;
-    ForceDirectories(ExtractFileDir(FConfigFile));
-  end
-  else
-  begin
-    FConfigFile := GetAppConfigDir(False) + 'barev.ini';
-    ForceDirectories(GetAppConfigDir(False));
-  end;
-  
   Caption := 'barev IM';
   Position := poScreenCenter;
   Width := 800;
   Height := 600;
 
-  EditMyPort.Text := '5299';
-
-  LoadConfig;
+  FConfig.Load;
+  ApplyConfigToUI;
   
-  MemoChat.ReadOnly := True;
   MemoLog.ReadOnly := True;
+  SetConnectedState(False);
   
-  ButtonSend.Enabled := False;
-  EditMessage.Enabled := False;
-  ButtonRemoveBuddy.Enabled := False;
-  
-  MemoLog.Lines.Add('Configuration file: ' + FConfigFile);
+  LogMessage('Configuration file: ' + FConfig.ConfigFile);
+
+  if FConfig.IsValidForAutoConnect then
+  begin
+    LogMessage('Auto-connecting...');
+    Application.ProcessMessages;
+    Sleep(100);
+    ButtonConnectClick(nil);
+  end;
 end;
 
 procedure TFormMain.FormDestroy(Sender: TObject);
 begin
   if Assigned(FClient) then
   begin
-    SaveBuddies;
+    if Assigned(FContactManager) then
+      FContactManager.SaveContacts;
     FClient.Stop;
     FClient.Free;
   end;
 
-  ClearAllChatHistory;
-  FChatHistory.Free;
+  ApplyUIToConfig;
+  FConfig.Save;
+
+  FContactManager.Free;
+  FChatManager.Free;
+  FConfig.Free;
+end;
+
+procedure TFormMain.ApplyConfigToUI;
+begin
+  EditMyNick.Text := FConfig.Nick;
+  EditMyIPv6.Text := FConfig.IPv6;
+  EditMyPort.Text := IntToStr(FConfig.Port);
   
-  SaveConfig;
+  Left := FConfig.WindowLeft;
+  Top := FConfig.WindowTop;
+  Width := FConfig.WindowWidth;
+  Height := FConfig.WindowHeight;
+end;
+
+procedure TFormMain.ApplyUIToConfig;
+var
+  Port: Integer;
+begin
+  FConfig.Nick := EditMyNick.Text;
+  FConfig.IPv6 := EditMyIPv6.Text;
+  
+  if TryStrToInt(Trim(EditMyPort.Text), Port) then
+    FConfig.Port := Port
+  else
+    FConfig.Port := DEFAULT_PORT;
+  
+  FConfig.WindowLeft := Left;
+  FConfig.WindowTop := Top;
+  FConfig.WindowWidth := Width;
+  FConfig.WindowHeight := Height;
+end;
+
+procedure TFormMain.SetConnectedState(Connected: Boolean);
+begin
+  FConnected := Connected;
+  
+  if Connected then
+  begin
+    ButtonConnect.Caption := 'Disconnect';
+    EditMyNick.Enabled := False;
+    EditMyIPv6.Enabled := False;
+    EditMyPort.Enabled := False;
+    ButtonAddBuddy.Enabled := True;
+    Timer1.Enabled := True;
+  end
+  else
+  begin
+    ButtonConnect.Caption := 'Connect';
+    EditMyNick.Enabled := True;
+    EditMyIPv6.Enabled := True;
+    EditMyPort.Enabled := True;
+    ButtonAddBuddy.Enabled := False;
+    ButtonSend.Enabled := False;
+    EditMessage.Enabled := False;
+    Timer1.Enabled := False;
+  end;
+end;
+
+procedure TFormMain.LogMessage(const Message: string);
+begin
+  MemoLog.Lines.Add(Message);
+end;
+
+procedure TFormMain.OnContactLog(const Message: string);
+begin
+  LogMessage(Message);
 end;
 
 procedure TFormMain.ButtonConnectClick(Sender: TObject);
@@ -152,24 +207,28 @@ begin
     if Trim(EditMyNick.Text) = '' then
     begin
       ShowMessage('Please enter your nickname');
+      EditMyNick.SetFocus;
       Exit;
     end;
     
     if Trim(EditMyIPv6.Text) = '' then
     begin
       ShowMessage('Please enter your IPv6 address');
+      EditMyIPv6.SetFocus;
       Exit;
     end;
-
+    
     if not TryStrToInt(Trim(EditMyPort.Text), Port) then
     begin
       ShowMessage('Invalid port number');
+      EditMyPort.SetFocus;
       Exit;
     end;
     
     if (Port < 1) or (Port > 65535) then
     begin
       ShowMessage('Port must be between 1 and 65535');
+      EditMyPort.SetFocus;
       Exit;
     end;
     
@@ -181,18 +240,13 @@ begin
       
       if FClient.Start then
       begin
-        FConnected := True;
-        ButtonConnect.Caption := 'Disconnect';
-        EditMyNick.Enabled := False;
-        EditMyIPv6.Enabled := False;
-        EditMyPort.Enabled := False;
-        ButtonAddBuddy.Enabled := True;
-        ButtonRemoveBuddy.Enabled := True;
-        Timer1.Enabled := True;
-        
-        MemoLog.Lines.Add('=== Connected on port ' + IntToStr(Port) + ' ===');
+        SetConnectedState(True);
+        LogMessage('=== Connected on port ' + IntToStr(Port) + ' ===');
 
-        LoadBuddies;
+        FContactManager := TContactManager.Create(FClient, FConfig.GetContactsFilePath);
+        FContactManager.OnLog := @OnContactLog;
+        FContactManager.LoadContacts;
+        
         UpdateBuddyList;
       end
       else
@@ -215,34 +269,29 @@ begin
   end
   else
   begin
+    if Assigned(FContactManager) then
+    begin
+      FContactManager.SaveContacts;
+      FContactManager.Free;
+      FContactManager := nil;
+    end;
+    
     if Assigned(FClient) then
     begin
-      SaveBuddies;
       FClient.Stop;
       FClient.Free;
       FClient := nil;
     end;
     
-    FConnected := False;
     FCurrentBuddy := nil;
-    ButtonConnect.Caption := 'Connect';
-    EditMyNick.Enabled := True;
-    EditMyIPv6.Enabled := True;
-    EditMyPort.Enabled := True;
-    ButtonAddBuddy.Enabled := False;
-    ButtonRemoveBuddy.Enabled := False;
-    ButtonSend.Enabled := False;
-    EditMessage.Enabled := False;
-    Timer1.Enabled := False;
+    SetConnectedState(False);
     
     ListBoxBuddies.Clear;
-
-    ClearAllChatHistory;
-    MemoChat.Clear;
+    FChatManager.CloseAllTabs;
+    FChatManager.ClearAllHistory;
     MemoLog.Clear;
-    LabelChat.Caption := 'Chat';
     
-    MemoLog.Lines.Add('=== Disconnected ===');
+    LogMessage('=== Disconnected ===');
   end;
 end;
 
@@ -250,38 +299,36 @@ procedure TFormMain.ButtonAddBuddyClick(Sender: TObject);
 var
   BuddyNick, BuddyIPv6, BuddyPortStr: string;
   BuddyPort: Integer;
-  Buddy: TBarevBuddy;
 begin
   if not FConnected then
     Exit;
-    
+  
   BuddyNick := '';
   BuddyIPv6 := '';
-  BuddyPortStr := '5299';
+  BuddyPortStr := IntToStr(DEFAULT_PORT);
   
   if InputQuery('Add Buddy', 'Enter buddy nickname:', BuddyNick) then
   begin
     if Trim(BuddyNick) = '' then
       Exit;
-      
+    
     if InputQuery('Add Buddy', 'Enter buddy IPv6 address:', BuddyIPv6) then
     begin
       if Trim(BuddyIPv6) = '' then
         Exit;
       
-      if InputQuery('Add Buddy', 'Enter buddy port (default 5299):', BuddyPortStr) then
+      if InputQuery('Add Buddy', 'Enter buddy port (default ' + IntToStr(DEFAULT_PORT) + '):', BuddyPortStr) then
       begin
         if not TryStrToInt(Trim(BuddyPortStr), BuddyPort) then
-          BuddyPort := 5299;
-          
+          BuddyPort := DEFAULT_PORT;
+        
         if (BuddyPort < 1) or (BuddyPort > 65535) then
-          BuddyPort := 5299;
+          BuddyPort := DEFAULT_PORT;
         
         try
-          Buddy := FClient.AddBuddy(BuddyNick, BuddyIPv6, BuddyPort);
+          FContactManager.AddBuddy(BuddyNick, BuddyIPv6, BuddyPort);
+          FContactManager.SaveContacts;
           UpdateBuddyList;
-          SaveBuddies;
-          MemoLog.Lines.Add('Added buddy: ' + BuddyNick + ' (' + BuddyIPv6 + ':' + IntToStr(BuddyPort) + ')');
         except
           on E: Exception do
             ShowMessage('Error adding buddy: ' + E.Message);
@@ -291,68 +338,64 @@ begin
   end;
 end;
 
-procedure TFormMain.ButtonRemoveBuddyClick(Sender: TObject);
+procedure TFormMain.MenuItemRemoveBuddyClick(Sender: TObject);
 var
   Index: Integer;
   BuddyNick: string;
-  I: Integer;
   Buddy: TBarevBuddy;
-  BuddyJID: string;
+  TabSheet: TTabSheet;
+  I: Integer;
 begin
   if not FConnected then
     Exit;
-    
+  
   Index := ListBoxBuddies.ItemIndex;
   if Index < 0 then
   begin
     ShowMessage('Please select a buddy to remove');
     Exit;
   end;
-
+  
   BuddyNick := Copy(ListBoxBuddies.Items[Index], 1, Pos(' ', ListBoxBuddies.Items[Index]) - 1);
-
-  if MessageDlg('Remove Buddy', 
+  
+  if MessageDlg('Remove Buddy',
                 'Are you sure you want to remove ' + BuddyNick + '?',
                 mtConfirmation, [mbYes, mbNo], 0) <> mrYes then
     Exit;
-
-  BuddyJID := '';
-  for I := 0 to FClient.GetBuddyCount - 1 do
-  begin
-    Buddy := FClient.GetBuddyByIndex(I);
-    if Buddy.Nick = BuddyNick then
-    begin
-      BuddyJID := Buddy.JID;
-      Break;
-    end;
-  end;
   
-  if BuddyJID = '' then
+  Buddy := FContactManager.FindBuddyByNick(BuddyNick);
+  if not Assigned(Buddy) then
   begin
     ShowMessage('Could not find buddy');
     Exit;
   end;
   
   try
-    if Assigned(FCurrentBuddy) and (FCurrentBuddy.JID = BuddyJID) then
+    if Assigned(FCurrentBuddy) and (FCurrentBuddy.JID = Buddy.JID) then
     begin
       FCurrentBuddy := nil;
-      MemoChat.Clear;
-      LabelChat.Caption := 'Chat';
       ButtonSend.Enabled := False;
       EditMessage.Enabled := False;
     end;
 
-    if FClient.RemoveBuddy(BuddyJID) then
+    for I := 0 to PageControlChats.PageCount - 1 do
     begin
+      if PageControlChats.Pages[I].Caption = BuddyNick then
+      begin
+        TabSheet := PageControlChats.Pages[I];
+        FChatManager.CloseTab(TabSheet);
+        Break;
+      end;
+    end;
+    
+    if FContactManager.RemoveBuddy(Buddy.JID) then
+    begin
+      FContactManager.SaveContacts;
       UpdateBuddyList;
-      SaveBuddies;
-      MemoLog.Lines.Add('Removed buddy: ' + BuddyNick);
+      LogMessage('Removed buddy: ' + BuddyNick);
     end
     else
-    begin
       ShowMessage('Failed to remove buddy');
-    end;
   except
     on E: Exception do
       ShowMessage('Error removing buddy: ' + E.Message);
@@ -362,20 +405,21 @@ end;
 procedure TFormMain.ButtonSendClick(Sender: TObject);
 var
   MessageText: string;
+  TabSheet: TTabSheet;
 begin
   if not Assigned(FCurrentBuddy) then
     Exit;
-    
+  
   MessageText := Trim(EditMessage.Text);
   if MessageText = '' then
     Exit;
-    
+  
   try
     FClient.SendMessage(FCurrentBuddy.JID, MessageText);
 
-    SaveChatMessage(FCurrentBuddy.JID, EditMyNick.Text, MessageText, False);
-
-    AddChatMessage(EditMyNick.Text, MessageText, False);
+    TabSheet := FChatManager.GetOrCreateTab(FCurrentBuddy.Nick, FCurrentBuddy.JID);
+    FChatManager.AddMessageToTab(TabSheet, EditMyNick.Text, MessageText, False);
+    FChatManager.SaveMessageToHistory(FCurrentBuddy.JID, EditMyNick.Text, MessageText, False);
     
     EditMessage.Clear;
     EditMessage.SetFocus;
@@ -397,46 +441,60 @@ end;
 procedure TFormMain.ListBoxBuddiesDblClick(Sender: TObject);
 var
   Index: Integer;
-  JID: string;
-  I: Integer;
+  BuddyNick: string;
   Buddy: TBarevBuddy;
+  TabSheet: TTabSheet;
 begin
   Index := ListBoxBuddies.ItemIndex;
   if Index < 0 then
     Exit;
-
-  JID := Copy(ListBoxBuddies.Items[Index], 1, Pos(' ', ListBoxBuddies.Items[Index]) - 1);
-
-  for I := 0 to FClient.GetBuddyCount - 1 do
+  
+  BuddyNick := Copy(ListBoxBuddies.Items[Index], 1, Pos(' ', ListBoxBuddies.Items[Index]) - 1);
+  Buddy := FContactManager.FindBuddyByNick(BuddyNick);
+  
+  if Assigned(Buddy) then
   begin
-    Buddy := FClient.GetBuddyByIndex(I);
-    if Buddy.Nick = JID then
-    begin
-      if not Assigned(FCurrentBuddy) or (FCurrentBuddy.JID <> Buddy.JID) then
-      begin
-        FCurrentBuddy := Buddy;
+    FCurrentBuddy := Buddy;
 
-        LoadChatHistory(FCurrentBuddy.JID);
-        
-        LabelChat.Caption := 'Chat with: ' + FCurrentBuddy.Nick;
-        MemoLog.Lines.Add('Switched to chat with: ' + FCurrentBuddy.Nick);
-      end;
-
-      try
-        FClient.ConnectToBuddy(FCurrentBuddy.JID);
-        
-        ButtonSend.Enabled := True;
-        EditMessage.Enabled := True;
-        EditMessage.SetFocus;
-        
-        MemoLog.Lines.Add('Connecting to: ' + FCurrentBuddy.Nick);
-      except
-        on E: Exception do
-          ShowMessage('Error connecting to buddy: ' + E.Message);
-      end;
+    TabSheet := FChatManager.GetOrCreateTab(Buddy.Nick, Buddy.JID);
+    PageControlChats.ActivePage := TabSheet;
+    
+    LogMessage('Opened chat with: ' + FCurrentBuddy.Nick);
+    
+    try
+      FClient.ConnectToBuddy(FCurrentBuddy.JID);
       
-      Break;
+      ButtonSend.Enabled := True;
+      EditMessage.Enabled := True;
+      EditMessage.SetFocus;
+      
+      LogMessage('Connecting to: ' + FCurrentBuddy.Nick);
+    except
+      on E: Exception do
+        ShowMessage('Error connecting to buddy: ' + E.Message);
     end;
+  end;
+end;
+
+procedure TFormMain.PageControlChatsCloseTabClicked(Sender: TObject);
+var
+  TabSheet: TTabSheet;
+  TabCaption: string;
+begin
+  if PageControlChats.ActivePage <> nil then
+  begin
+    TabSheet := PageControlChats.ActivePage;
+    TabCaption := TabSheet.Caption;
+
+    if Assigned(FCurrentBuddy) and (TabCaption = FCurrentBuddy.Nick) then
+    begin
+      FCurrentBuddy := nil;
+      ButtonSend.Enabled := False;
+      EditMessage.Enabled := False;
+    end;
+    
+    FChatManager.CloseTab(TabSheet);
+    LogMessage('Closed chat tab: ' + TabCaption);
   end;
 end;
 
@@ -448,32 +506,32 @@ begin
       FClient.Process;
     except
       on E: Exception do
-        MemoLog.Lines.Add('Process error: ' + E.Message);
+        LogMessage('Process error: ' + E.Message);
     end;
   end;
 end;
 
 procedure TFormMain.OnMessageReceived(Buddy: TBarevBuddy; const MessageText: string);
+var
+  TabSheet: TTabSheet;
 begin
-  SaveChatMessage(Buddy.JID, Buddy.Nick, MessageText, True);
+  FChatManager.SaveMessageToHistory(Buddy.JID, Buddy.Nick, MessageText, True);
 
-  if Assigned(FCurrentBuddy) and (FCurrentBuddy.JID = Buddy.JID) then
-  begin
-    AddChatMessage(Buddy.Nick, MessageText, True);
-  end
-  else
-  begin
-    MemoLog.Lines.Add('Message from ' + Buddy.Nick + ' (not in active chat)');
-  end;
+  TabSheet := FChatManager.GetOrCreateTab(Buddy.Nick, Buddy.JID);
+  FChatManager.AddMessageToTab(TabSheet, Buddy.Nick, MessageText, True);
+
+  if not Assigned(FCurrentBuddy) or (FCurrentBuddy.JID <> Buddy.JID) then
+    LogMessage('Message from ' + Buddy.Nick);
 end;
 
 procedure TFormMain.OnBuddyStatus(Buddy: TBarevBuddy; OldStatus, NewStatus: TBuddyStatus);
 begin
   UpdateBuddyList;
+  
   if NewStatus <> bsOffline then
-    MemoLog.Lines.Add('Buddy online: ' + Buddy.Nick)
+    LogMessage('Buddy online: ' + Buddy.Nick)
   else
-    MemoLog.Lines.Add('Buddy offline: ' + Buddy.Nick);
+    LogMessage('Buddy offline: ' + Buddy.Nick);
 end;
 
 procedure TFormMain.OnLog(const LogLevel, Message: string);
@@ -486,250 +544,29 @@ var
   I: Integer;
   Status: string;
   Buddy: TBarevBuddy;
+  BuddyCount: Integer;
 begin
   ListBoxBuddies.Clear;
   
-  if not Assigned(FClient) then
-    Exit;
-    
-  for I := 0 to FClient.GetBuddyCount - 1 do
+  if not Assigned(FContactManager) then
   begin
-    Buddy := FClient.GetBuddyByIndex(I);
+    LabelBuddies.Caption := 'Buddies (0)';
+    Exit;
+  end;
+  
+  BuddyCount := FContactManager.GetBuddyCount;
+  LabelBuddies.Caption := 'Buddies (' + IntToStr(BuddyCount) + ')';
+  
+  for I := 0 to BuddyCount - 1 do
+  begin
+    Buddy := FContactManager.GetBuddyByIndex(I);
     if Buddy.Status <> bsOffline then
       Status := '[Online]'
     else
       Status := '[Offline]';
-      
+    
     ListBoxBuddies.Items.Add(Buddy.Nick + ' ' + Status);
   end;
-end;
-
-procedure TFormMain.AddChatMessage(const Nick, Message: string; Incoming: Boolean);
-var
-  Prefix: string;
-begin
-  if Incoming then
-    Prefix := '>> '
-  else
-    Prefix := '<< ';
-    
-  MemoChat.Lines.Add('[' + TimeToStr(Now) + '] ' + Prefix + Nick + ': ' + Message);
-
-  MemoChat.SelStart := Length(MemoChat.Text);
-  MemoChat.SelLength := 0;
-end;
-
-procedure TFormMain.LoadConfig;
-var
-  Ini: TIniFile;
-begin
-  if not FileExists(FConfigFile) then
-  begin
-    EditMyNick.Text := 'mynick';
-    EditMyIPv6.Text := '201:af82:9f2f:7809::1';
-    EditMyPort.Text := '5299';
-    Exit;
-  end;
-  
-  try
-    Ini := TIniFile.Create(FConfigFile);
-    try
-      EditMyNick.Text := Ini.ReadString('User', 'Nick', 'mynick');
-      EditMyIPv6.Text := Ini.ReadString('User', 'IPv6', '201:af82:9f2f:7809::1');
-      EditMyPort.Text := IntToStr(Ini.ReadInteger('User', 'Port', 5299));
-
-      Left := Ini.ReadInteger('Window', 'Left', Left);
-      Top := Ini.ReadInteger('Window', 'Top', Top);
-      Width := Ini.ReadInteger('Window', 'Width', 800);
-      Height := Ini.ReadInteger('Window', 'Height', 600);
-    finally
-      Ini.Free;
-    end;
-  except
-    on E: Exception do
-      MemoLog.Lines.Add('Error loading config: ' + E.Message);
-  end;
-end;
-
-procedure TFormMain.SaveConfig;
-var
-  Ini: TIniFile;
-  Port: Integer;
-begin
-  try
-    Ini := TIniFile.Create(FConfigFile);
-    try
-      Ini.WriteString('User', 'Nick', EditMyNick.Text);
-      Ini.WriteString('User', 'IPv6', EditMyIPv6.Text);
-
-      if TryStrToInt(Trim(EditMyPort.Text), Port) then
-        Ini.WriteInteger('User', 'Port', Port)
-      else
-        Ini.WriteInteger('User', 'Port', 5299);
-
-      Ini.WriteInteger('Window', 'Left', Left);
-      Ini.WriteInteger('Window', 'Top', Top);
-      Ini.WriteInteger('Window', 'Width', Width);
-      Ini.WriteInteger('Window', 'Height', Height);
-    finally
-      Ini.Free;
-    end;
-  except
-    on E: Exception do
-      MemoLog.Lines.Add('Error saving config: ' + E.Message);
-  end;
-end;
-
-procedure TFormMain.LoadBuddies;
-var
-  Ini: TIniFile;
-  Sections: TStringList;
-  I: Integer;
-  Nick, IPv6: string;
-  Port: Integer;
-begin
-  if not Assigned(FClient) then
-    Exit;
-    
-  if not FileExists(FConfigFile) then
-    Exit;
-    
-  try
-    Ini := TIniFile.Create(FConfigFile);
-    Sections := TStringList.Create;
-    try
-      Ini.ReadSections(Sections);
-      
-      for I := 0 to Sections.Count - 1 do
-      begin
-        if Pos('Buddy_', Sections[I]) = 1 then
-        begin
-          Nick := Ini.ReadString(Sections[I], 'Nick', '');
-          IPv6 := Ini.ReadString(Sections[I], 'IPv6', '');
-          Port := Ini.ReadInteger(Sections[I], 'Port', 5299);
-          
-          if (Nick <> '') and (IPv6 <> '') then
-          begin
-            try
-              FClient.AddBuddy(Nick, IPv6, Port);
-              MemoLog.Lines.Add('Loaded buddy: ' + Nick + '@' + IPv6);
-            except
-              on E: Exception do
-                MemoLog.Lines.Add('Error loading buddy ' + Nick + ': ' + E.Message);
-            end;
-          end;
-        end;
-      end;
-    finally
-      Sections.Free;
-      Ini.Free;
-    end;
-  except
-    on E: Exception do
-      MemoLog.Lines.Add('Error loading buddies: ' + E.Message);
-  end;
-end;
-
-procedure TFormMain.SaveBuddies;
-var
-  Ini: TIniFile;
-  I: Integer;
-  Buddy: TBarevBuddy;
-  SectionName: string;
-  Sections: TStringList;
-  J: Integer;
-begin
-  if not Assigned(FClient) then
-    Exit;
-    
-  try
-    Ini := TIniFile.Create(FConfigFile);
-    Sections := TStringList.Create;
-    try
-      Ini.ReadSections(Sections);
-      for J := 0 to Sections.Count - 1 do
-      begin
-        if Pos('Buddy_', Sections[J]) = 1 then
-          Ini.EraseSection(Sections[J]);
-      end;
-
-      for I := 0 to FClient.GetBuddyCount - 1 do
-      begin
-        Buddy := FClient.GetBuddyByIndex(I);
-        SectionName := 'Buddy_' + IntToStr(I);
-        
-        Ini.WriteString(SectionName, 'Nick', Buddy.Nick);
-        Ini.WriteString(SectionName, 'IPv6', Buddy.IPv6Address);
-        Ini.WriteInteger(SectionName, 'Port', Buddy.Port);
-      end;
-    finally
-      Sections.Free;
-      Ini.Free;
-    end;
-  except
-    on E: Exception do
-      MemoLog.Lines.Add('Error saving buddies: ' + E.Message);
-  end;
-end;
-
-procedure TFormMain.SaveChatMessage(const BuddyJID, Nick, Message: string; Incoming: Boolean);
-var
-  History: TStringList;
-  Prefix: string;
-  HistoryLine: string;
-begin
-  History := TStringList(FChatHistory.Find(BuddyJID));
-  if not Assigned(History) then
-  begin
-    History := TStringList.Create;
-    FChatHistory.Add(BuddyJID, History);
-  end;
-
-  if Incoming then
-    Prefix := '>> '
-  else
-    Prefix := '<< ';
-    
-  HistoryLine := '[' + TimeToStr(Now) + '] ' + Prefix + Nick + ': ' + Message;
-  History.Add(HistoryLine);
-end;
-
-procedure TFormMain.LoadChatHistory(const BuddyJID: string);
-var
-  History: TStringList;
-  I: Integer;
-begin
-  MemoChat.Clear;
-
-  History := TStringList(FChatHistory.Find(BuddyJID));
-  if Assigned(History) then
-  begin
-    for I := 0 to History.Count - 1 do
-    begin
-      MemoChat.Lines.Add(History[I]);
-    end;
-
-    if MemoChat.Lines.Count > 0 then
-    begin
-      MemoChat.SelStart := Length(MemoChat.Text);
-      MemoChat.SelLength := 0;
-    end;
-  end;
-end;
-
-procedure TFormMain.ClearAllChatHistory;
-var
-  I: Integer;
-  History: TStringList;
-begin
-  for I := 0 to FChatHistory.Count - 1 do
-  begin
-    History := TStringList(FChatHistory.Items[I]);
-    if Assigned(History) then
-      History.Free;
-  end;
-  
-  FChatHistory.Clear;
 end;
 
 end.

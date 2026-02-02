@@ -78,7 +78,7 @@ fpc -Fu/path/to/barev/units barevim.lpr
 
 ## Configuration and Persistence
 
-The application automatically saves your settings and buddy list to a configuration file:
+The application automatically saves your settings to a configuration file:
 
 **Linux/Unix**: `~/.config/barevim/barev.ini`
 
@@ -95,17 +95,15 @@ Left=100
 Top=100
 Width=800
 Height=600
-
-[Buddy_0]
-Nick=bob
-IPv6=201:7a74:aa1e:101a::a1
-Port=5299
-
-[Buddy_1]
-Nick=charlie
-IPv6=202:baad:cafe:1234::1
-Port=5300
 ```
+
+and buddy list to the `contact.txt`:
+
+```
+bob@201:7a74:aa1e:101a::a1
+charlie@202:baad:cafe:1234::1:5300
+```
+
 
 ## Credits
 
