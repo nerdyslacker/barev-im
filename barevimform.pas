@@ -5,9 +5,9 @@ unit BarevIMForm;
 interface
 
 uses
-  Classes, SysUtils, Forms, Controls, Graphics, Dialogs, StdCtrls, ExtCtrls,
-  ComCtrls, Menus, Barev, BarevTypes,
-  BarevIMTypes, BarevIMConfig, BarevIMChat, BarevIMContacts, BarevIMAddBuddyDlg;
+  Classes, SysUtils, Forms, Controls, Graphics, Dialogs, StdCtrls, ExtCtrls, ComCtrls,
+  Menus, LCLType, Barev, BarevTypes, BarevIMTypes, BarevIMConfig, BarevIMChat,
+  BarevIMContacts, BarevIMAddBuddyDlg, BarevIMFileTransfer, BarevIMAvatar;
 
 type
 
@@ -17,33 +17,48 @@ type
     ButtonConnect: TButton;
     ButtonSend: TButton;
     ButtonAddBuddy: TButton;
-    EditMessage: TEdit;
+    ButtonSendFile: TButton;
+    MemoMessage: TMemo;
     EditMyNick: TEdit;
     EditMyIPv6: TEdit;
     EditMyPort: TEdit;
+    ImageAvatar: TImage;
     LabelMyNick: TLabel;
     LabelMyIPv6: TLabel;
     LabelMyPort: TLabel;
     LabelBuddies: TLabel;
     ListBoxBuddies: TListBox;
     MemoLog: TMemo;
+    OpenDialogFile: TOpenDialog;
+    OpenDialogAvatar: TOpenDialog;
+    SaveDialogFile: TSaveDialog;
     PageControlChats: TPageControl;
     Panel1: TPanel;
     Panel2: TPanel;
     Panel3: TPanel;
     Panel4: TPanel;
+    PopupMenuAvatar: TPopupMenu;
+    MenuItemSetAvatar: TMenuItem;
+    MenuItemClearAvatar: TMenuItem;
     Splitter1: TSplitter;
     Timer1: TTimer;
     PopupMenuBuddy: TPopupMenu;
     MenuItemRemoveBuddy: TMenuItem;
+    MenuItemSeparator1: TMenuItem;
+    MenuItemRequestAvatar: TMenuItem;
     
     procedure ButtonAddBuddyClick(Sender: TObject);
+    procedure ButtonSendFileClick(Sender: TObject);
     procedure MenuItemRemoveBuddyClick(Sender: TObject);
+    procedure MenuItemRequestAvatarClick(Sender: TObject);
+    procedure MenuItemSetAvatarClick(Sender: TObject);
+    procedure MenuItemClearAvatarClick(Sender: TObject);
     procedure ButtonConnectClick(Sender: TObject);
     procedure ButtonSendClick(Sender: TObject);
-    procedure EditMessageKeyPress(Sender: TObject; var Key: char);
+    procedure MemoMessageKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
+    procedure ImageAvatarClick(Sender: TObject);
     procedure ListBoxBuddiesDblClick(Sender: TObject);
     procedure PageControlChatsCloseTabClicked(Sender: TObject);
     procedure Timer1Timer(Sender: TObject);
@@ -55,18 +70,31 @@ type
     FConfig: TBarevConfig;
     FChatManager: TChatTabManager;
     FContactManager: TContactManager;
+    FFileTransferManager: TFileTransferManager;
+    FAvatarManager: TAvatarManager;
 
     procedure OnMessageReceived(Buddy: TBarevBuddy; const MessageText: string);
     procedure OnBuddyStatus(Buddy: TBarevBuddy; OldStatus, NewStatus: TBuddyStatus);
+    procedure OnTypingNotification(Buddy: TBarevBuddy; IsTyping: Boolean);
     procedure OnLog(const LogLevel, Message: string);
 
+    procedure OnFTOffer(Buddy: TBarevBuddy; const Sid, FileName: string; FileSize: Int64);
+    procedure OnFTProgress(Buddy: TBarevBuddy; const Sid: string; BytesDone, BytesTotal: Int64);
+    procedure OnFTComplete(Buddy: TBarevBuddy; const Sid, LocalPath: string);
+    procedure OnFTError(Buddy: TBarevBuddy; const Sid, ErrMsg: string);
+
     procedure OnContactLog(const Message: string);
+    procedure OnFileTransferLog(const Message: string);
+    procedure OnAvatarLog(const Message: string);
 
     procedure UpdateBuddyList;
+    procedure UpdateMyAvatarDisplay;
     procedure ApplyConfigToUI;
     procedure ApplyUIToConfig;
     procedure SetConnectedState(Connected: Boolean);
     procedure LogMessage(const Message: string);
+    procedure ShowFileOffer(const BuddyNick, FileName: string; FileSize: Int64; const Sid: string);
+    procedure DrawDefaultAvatar;
   public
   end;
 
@@ -78,6 +106,39 @@ implementation
 {$R *.lfm}
 
 { TFormMain }
+
+procedure TFormMain.DrawDefaultAvatar;
+var
+  Bmp: TBitmap;
+  CenterX, CenterY, Radius: Integer;
+begin
+  Bmp := TBitmap.Create;
+  try
+    Bmp.Width := 48;
+    Bmp.Height := 48;
+
+    Bmp.Canvas.Brush.Color := clSilver;
+    Bmp.Canvas.FillRect(0, 0, 48, 48);
+
+    CenterX := 24;
+    CenterY := 24;
+
+    Bmp.Canvas.Brush.Color := clGray;
+    Bmp.Canvas.Pen.Color := clGray;
+    Bmp.Canvas.Ellipse(CenterX - 8, 8, CenterX + 8, 24);
+
+    Bmp.Canvas.Ellipse(CenterX - 16, 26, CenterX + 16, 58);
+
+    Bmp.Canvas.Brush.Style := bsClear;
+    Bmp.Canvas.Pen.Color := clDkGray;
+    Bmp.Canvas.Pen.Width := 2;
+    Bmp.Canvas.Rectangle(0, 0, 48, 48);
+
+    ImageAvatar.Picture.Bitmap.Assign(Bmp);
+  finally
+    Bmp.Free;
+  end;
+end;
 
 procedure TFormMain.FormCreate(Sender: TObject);
 var
@@ -91,11 +152,23 @@ begin
   FConfig := TBarevConfig.Create(ConfigPath);
   FChatManager := TChatTabManager.Create(PageControlChats);
   FContactManager := nil;
+  FFileTransferManager := nil;
+  FAvatarManager := nil;
 
   Caption := 'barev IM';
   Position := poScreenCenter;
   Width := 800;
   Height := 600;
+
+  DrawDefaultAvatar;
+
+  OpenDialogFile.Title := 'Select File to Send';
+  OpenDialogFile.Filter := 'All Files|*.*';
+  
+  OpenDialogAvatar.Title := 'Select Avatar Image';
+  OpenDialogAvatar.Filter := 'Image Files|*.png;*.jpg;*.jpeg;*.gif;*.bmp|All Files|*.*';
+  
+  SaveDialogFile.Title := 'Save File As';
 
   FConfig.Load;
   ApplyConfigToUI;
@@ -127,6 +200,8 @@ begin
   ApplyUIToConfig;
   FConfig.Save;
 
+  FAvatarManager.Free;
+  FFileTransferManager.Free;
   FContactManager.Free;
   FChatManager.Free;
   FConfig.Free;
@@ -183,19 +258,30 @@ begin
     EditMyPort.Enabled := True;
     ButtonAddBuddy.Enabled := False;
     ButtonSend.Enabled := False;
-    EditMessage.Enabled := False;
+    ButtonSendFile.Enabled := False;
+    MemoMessage.Enabled := False;
     Timer1.Enabled := False;
   end;
 end;
 
 procedure TFormMain.LogMessage(const Message: string);
 begin
-  MemoLog.Lines.Add(Message);
+  MemoLog.Lines.Add('[' + TimeToStr(Now) + '] ' + Message);
 end;
 
 procedure TFormMain.OnContactLog(const Message: string);
 begin
   LogMessage(Message);
+end;
+
+procedure TFormMain.OnFileTransferLog(const Message: string);
+begin
+  LogMessage('[FT] ' + Message);
+end;
+
+procedure TFormMain.OnAvatarLog(const Message: string);
+begin
+  LogMessage('[Avatar] ' + Message);
 end;
 
 procedure TFormMain.ButtonConnectClick(Sender: TObject);
@@ -236,18 +322,34 @@ begin
       FClient := TBarevClient.Create(EditMyNick.Text, EditMyIPv6.Text, Port);
       FClient.OnMessageReceived := @OnMessageReceived;
       FClient.OnBuddyStatus := @OnBuddyStatus;
+      FClient.OnTypingNotification := @OnTypingNotification;
       FClient.OnLog := @OnLog;
       
       if FClient.Start then
       begin
         SetConnectedState(True);
-        LogMessage('=== Connected on port ' + IntToStr(Port) + ' ===');
+        LogMessage('=== Connected as ' + FClient.MyJID + ' on port ' + IntToStr(Port) + ' ===');
 
         FContactManager := TContactManager.Create(FClient, FConfig.GetContactsFilePath);
         FContactManager.OnLog := @OnContactLog;
         FContactManager.LoadContacts;
+
+        FFileTransferManager := TFileTransferManager.Create(FClient);
+        FFileTransferManager.OnLog := @OnFileTransferLog;
+
+        if Assigned(FClient.FileTransfer) then
+        begin
+          FClient.FileTransfer.OnFileOffer := @OnFTOffer;
+          FClient.FileTransfer.OnProgress := @OnFTProgress;
+          FClient.FileTransfer.OnComplete := @OnFTComplete;
+          FClient.FileTransfer.OnError := @OnFTError;
+        end;
+
+        FAvatarManager := TAvatarManager.Create(FClient);
+        FAvatarManager.OnLog := @OnAvatarLog;
         
         UpdateBuddyList;
+        UpdateMyAvatarDisplay;
       end
       else
       begin
@@ -272,15 +374,16 @@ begin
     if Assigned(FContactManager) then
     begin
       FContactManager.SaveContacts;
-      FContactManager.Free;
-      FContactManager := nil;
+      FreeAndNil(FContactManager);
     end;
+    
+    FreeAndNil(FAvatarManager);
+    FreeAndNil(FFileTransferManager);
     
     if Assigned(FClient) then
     begin
       FClient.Stop;
-      FClient.Free;
-      FClient := nil;
+      FreeAndNil(FClient);
     end;
     
     FCurrentBuddy := nil;
@@ -290,6 +393,8 @@ begin
     FChatManager.CloseAllTabs;
     FChatManager.ClearAllHistory;
     MemoLog.Clear;
+
+    ImageAvatar.Picture.Clear;
     
     LogMessage('=== Disconnected ===');
   end;
@@ -302,7 +407,7 @@ var
 begin
   if not FConnected then
     Exit;
-
+  
   if TAddBuddyDialog.Execute(BuddyNick, BuddyIPv6, BuddyPort) then
   begin
     try
@@ -312,6 +417,31 @@ begin
     except
       on E: Exception do
         ShowMessage('Error adding buddy: ' + E.Message);
+    end;
+  end;
+end;
+
+procedure TFormMain.ButtonSendFileClick(Sender: TObject);
+var
+  Sid: string;
+begin
+  if not FConnected or not Assigned(FCurrentBuddy) then
+  begin
+    ShowMessage('Please select a buddy first');
+    Exit;
+  end;
+  
+  if OpenDialogFile.Execute then
+  begin
+    Sid := FFileTransferManager.SendFile(FCurrentBuddy.JID, OpenDialogFile.FileName);
+    if Sid <> '' then
+    begin
+      FChatManager.AddMessageToTab(
+        FChatManager.GetOrCreateTab(FCurrentBuddy.Nick, FCurrentBuddy.JID),
+        EditMyNick.Text,
+        '📤 Sending file: ' + ExtractFileName(OpenDialogFile.FileName),
+        False
+      );
     end;
   end;
 end;
@@ -353,7 +483,8 @@ begin
     begin
       FCurrentBuddy := nil;
       ButtonSend.Enabled := False;
-      EditMessage.Enabled := False;
+      ButtonSendFile.Enabled := False;
+      MemoMessage.Enabled := False;
     end;
 
     for I := 0 to PageControlChats.PageCount - 1 do
@@ -380,6 +511,61 @@ begin
   end;
 end;
 
+procedure TFormMain.MenuItemRequestAvatarClick(Sender: TObject);
+var
+  Index: Integer;
+  BuddyNick: string;
+  Buddy: TBarevBuddy;
+begin
+  if not FConnected then
+    Exit;
+  
+  Index := ListBoxBuddies.ItemIndex;
+  if Index < 0 then
+  begin
+    ShowMessage('Please select a buddy');
+    Exit;
+  end;
+  
+  BuddyNick := Copy(ListBoxBuddies.Items[Index], 1, Pos(' ', ListBoxBuddies.Items[Index]) - 1);
+  Buddy := FContactManager.FindBuddyByNick(BuddyNick);
+  
+  if Assigned(Buddy) then
+    FAvatarManager.RequestBuddyAvatar(Buddy.JID);
+end;
+
+procedure TFormMain.MenuItemSetAvatarClick(Sender: TObject);
+begin
+  if not FConnected then
+    Exit;
+  
+  if OpenDialogAvatar.Execute then
+  begin
+    if FAvatarManager.SetMyAvatar(OpenDialogAvatar.FileName) then
+      UpdateMyAvatarDisplay;
+  end;
+end;
+
+procedure TFormMain.MenuItemClearAvatarClick(Sender: TObject);
+begin
+  if not FConnected then
+    Exit;
+  
+  FAvatarManager.ClearMyAvatar;
+  DrawDefaultAvatar;
+end;
+
+procedure TFormMain.ImageAvatarClick(Sender: TObject);
+var
+  Pt: TPoint;
+begin
+  if FConnected then
+  begin
+    Pt := ImageAvatar.ClientToScreen(Point(0, ImageAvatar.Height));
+    PopupMenuAvatar.PopUp(Pt.X, Pt.Y);
+  end;
+end;
+
 procedure TFormMain.ButtonSendClick(Sender: TObject);
 var
   MessageText: string;
@@ -388,7 +574,7 @@ begin
   if not Assigned(FCurrentBuddy) then
     Exit;
   
-  MessageText := Trim(EditMessage.Text);
+  MessageText := Trim(MemoMessage.Text);
   if MessageText = '' then
     Exit;
   
@@ -399,19 +585,19 @@ begin
     FChatManager.AddMessageToTab(TabSheet, EditMyNick.Text, MessageText, False);
     FChatManager.SaveMessageToHistory(FCurrentBuddy.JID, EditMyNick.Text, MessageText, False);
     
-    EditMessage.Clear;
-    EditMessage.SetFocus;
+    MemoMessage.Clear;
+    MemoMessage.SetFocus;
   except
     on E: Exception do
       ShowMessage('Error sending message: ' + E.Message);
   end;
 end;
 
-procedure TFormMain.EditMessageKeyPress(Sender: TObject; var Key: char);
+procedure TFormMain.MemoMessageKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
 begin
-  if Key = #13 then
+  if (Key = 13) and (ssCtrl in Shift) then
   begin
-    Key := #0;
+    Key := 0;
     ButtonSendClick(Sender);
   end;
 end;
@@ -443,8 +629,9 @@ begin
       FClient.ConnectToBuddy(FCurrentBuddy.JID);
       
       ButtonSend.Enabled := True;
-      EditMessage.Enabled := True;
-      EditMessage.SetFocus;
+      ButtonSendFile.Enabled := True;
+      MemoMessage.Enabled := True;
+      MemoMessage.SetFocus;
       
       LogMessage('Connecting to: ' + FCurrentBuddy.Nick);
     except
@@ -468,7 +655,8 @@ begin
     begin
       FCurrentBuddy := nil;
       ButtonSend.Enabled := False;
-      EditMessage.Enabled := False;
+      ButtonSendFile.Enabled := False;
+      MemoMessage.Enabled := False;
     end;
     
     FChatManager.CloseTab(TabSheet);
@@ -512,9 +700,85 @@ begin
     LogMessage('Buddy offline: ' + Buddy.Nick);
 end;
 
+procedure TFormMain.OnTypingNotification(Buddy: TBarevBuddy; IsTyping: Boolean);
+var
+  TabSheet: TTabSheet;
+begin
+  TabSheet := FChatManager.GetOrCreateTab(Buddy.Nick, Buddy.JID);
+  
+  if IsTyping then
+    TabSheet.Caption := Buddy.Nick + ' (typing...)'
+  else
+    TabSheet.Caption := Buddy.Nick;
+end;
+
 procedure TFormMain.OnLog(const LogLevel, Message: string);
 begin
-  MemoLog.Lines.Add('[' + TimeToStr(Now) + '] ' + LogLevel + ': ' + Message);
+  MemoLog.Lines.Add('[' + LogLevel + '] ' + Message);
+end;
+
+procedure TFormMain.OnFTOffer(Buddy: TBarevBuddy; const Sid, FileName: string; FileSize: Int64);
+begin
+  FFileTransferManager.AddPendingOffer(Sid, FileName, FileSize, Buddy.Nick, Buddy.JID);
+
+  ShowFileOffer(Buddy.Nick, FileName, FileSize, Sid);
+end;
+
+procedure TFormMain.OnFTProgress(Buddy: TBarevBuddy; const Sid: string; BytesDone, BytesTotal: Int64);
+begin
+  if (BytesDone mod (1024 * 1024)) < 1024 then // Log every ~1MB
+    LogMessage('Transfer ' + Sid + ': ' + IntToStr(BytesDone div 1024) + 'KB / ' + 
+               IntToStr(BytesTotal div 1024) + 'KB');
+end;
+
+procedure TFormMain.OnFTComplete(Buddy: TBarevBuddy; const Sid, LocalPath: string);
+var
+  TabSheet: TTabSheet;
+begin
+  LogMessage('File transfer complete: ' + LocalPath);
+
+  TabSheet := FChatManager.GetOrCreateTab(Buddy.Nick, Buddy.JID);
+  FChatManager.AddMessageToTab(TabSheet, EditMyNick.Text, 
+    '📥 File received: ' + ExtractFileName(LocalPath), True);
+  
+  ShowMessage('File received from ' + Buddy.Nick + ':' + LineEnding + LocalPath);
+end;
+
+procedure TFormMain.OnFTError(Buddy: TBarevBuddy; const Sid, ErrMsg: string);
+begin
+  LogMessage('File transfer error (' + Sid + '): ' + ErrMsg);
+  FFileTransferManager.RemovePendingOffer(Sid);
+end;
+
+procedure TFormMain.ShowFileOffer(const BuddyNick, FileName: string; FileSize: Int64; const Sid: string);
+var
+  SizeStr: string;
+  Response: Integer;
+begin
+  if FileSize < 1024 then
+    SizeStr := IntToStr(FileSize) + ' bytes'
+  else if FileSize < 1024 * 1024 then
+    SizeStr := Format('%.1f KB', [FileSize / 1024])
+  else
+    SizeStr := Format('%.1f MB', [FileSize / (1024 * 1024)]);
+  
+  Response := MessageDlg('Incoming File',
+    BuddyNick + ' wants to send you a file:' + LineEnding + LineEnding +
+    'File: ' + FileName + LineEnding +
+    'Size: ' + SizeStr + LineEnding + LineEnding +
+    'Accept this file?',
+    mtConfirmation, [mbYes, mbNo], 0);
+  
+  if Response = mrYes then
+  begin
+    SaveDialogFile.FileName := FileName;
+    if SaveDialogFile.Execute then
+      FFileTransferManager.AcceptFile(Sid, SaveDialogFile.FileName)
+    else
+      FFileTransferManager.RejectFile(Sid);
+  end
+  else
+    FFileTransferManager.RejectFile(Sid);
 end;
 
 procedure TFormMain.UpdateBuddyList;
@@ -545,6 +809,26 @@ begin
     
     ListBoxBuddies.Items.Add(Buddy.Nick + ' ' + Status);
   end;
+end;
+
+procedure TFormMain.UpdateMyAvatarDisplay;
+var
+  AvatarPath: string;
+begin
+  if not Assigned(FAvatarManager) then
+    Exit;
+
+  AvatarPath := FAvatarManager.GetMyAvatarPath;
+  if (AvatarPath <> '') and FileExists(AvatarPath) then
+  begin
+    try
+      ImageAvatar.Picture.LoadFromFile(AvatarPath);
+    except
+      DrawDefaultAvatar;
+    end;
+  end
+  else
+    DrawDefaultAvatar;
 end;
 
 end.
