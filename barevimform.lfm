@@ -10,6 +10,7 @@ object FormMain: TFormMain
   LCLVersion = '4.4.0.0'
   OnCreate = FormCreate
   OnDestroy = FormDestroy
+  OnShow = FormShow
   object Panel1: TPanel
     Left = 0
     Height = 60
@@ -19,62 +20,54 @@ object FormMain: TFormMain
     ClientHeight = 60
     ClientWidth = 800
     TabOrder = 0
-    object LabelMyNick: TLabel
-      Left = 16
-      Height = 19
-      Top = 22
-      Width = 40
-      Caption = 'Nick:'
-      ParentColor = False
+    object ImageAvatar: TImage
+      Left = 8
+      Height = 48
+      Hint = 'Click to set avatar'
+      Top = 6
+      Width = 48
+      ParentShowHint = False
+      PopupMenu = PopupMenuAvatar
+      ShowHint = True
+      Stretch = True
+      OnClick = ImageAvatarClick
     end
-    object LabelMyIPv6: TLabel
-      Left = 240
+    object LabelUserInfo: TLabel
+      Left = 70
       Height = 19
-      Top = 22
-      Width = 40
-      Caption = 'IPv6:'
+      Top = 6
+      Width = 150
+      Caption = 'Not connected'
+      Font.Style = [fsBold]
       ParentColor = False
+      ParentFont = False
     end
-    object LabelMyPort: TLabel
-      Left = 570
-      Height = 19
-      Top = 22
-      Width = 38
-      Caption = 'Port:'
-      ParentColor = False
-    end
-    object EditMyNick: TEdit
-      Left = 60
-      Height = 27
-      Top = 18
-      Width = 160
+    object ComboBoxStatus: TComboBox
+      Left = 70
+      Height = 28
+      Top = 28
+      Width = 140
+      Enabled = False
+      ItemHeight = 0
+      Items.Strings = (
+        '🟢 Available'
+        '🟡 Away'
+        '🟠 Extended Away'
+        '⛔ Do Not Disturb'
+      )
+      Style = csDropDownList
       TabOrder = 0
-      Text = 'mynick'
+      OnChange = ComboBoxStatusChange
     end
-    object EditMyIPv6: TEdit
-      Left = 280
-      Height = 27
-      Top = 18
-      Width = 270
+    object ButtonDisconnect: TButton
+      Left = 220
+      Height = 28
+      Top = 28
+      Width = 90
+      Caption = 'Disconnect'
+      Enabled = False
       TabOrder = 1
-      Text = '201:af82:9f2f:7809::1'
-    end
-    object EditMyPort: TEdit
-      Left = 605
-      Height = 27
-      Top = 18
-      Width = 70
-      TabOrder = 2
-      Text = '5299'
-    end
-    object ButtonConnect: TButton
-      Left = 690
-      Height = 40
-      Top = 10
-      Width = 100
-      Caption = 'Connect'
-      TabOrder = 3
-      OnClick = ButtonConnectClick
+      OnClick = ButtonDisconnectClick
     end
   end
   object Panel2: TPanel
@@ -153,22 +146,23 @@ object FormMain: TFormMain
       ClientHeight = 78
       ClientWidth = 593
       TabOrder = 1
-      object EditMessage: TEdit
+      object MemoMessage: TMemo
         Left = 8
-        Height = 27
-        Top = 16
+        Height = 60
+        Top = 8
         Width = 460
-        Anchors = [akTop, akLeft, akRight]
+        Anchors = [akTop, akLeft, akRight, akBottom]
         Enabled = False
+        ScrollBars = ssAutoVertical
         TabOrder = 0
-        OnKeyPress = EditMessageKeyPress
+        OnKeyDown = MemoMessageKeyDown
       end
       object ButtonSend: TButton
         Left = 480
-        Height = 48
+        Height = 60
         Top = 8
         Width = 100
-        Anchors = [akTop, akRight]
+        Anchors = [akTop, akRight, akBottom]
         Caption = 'Send'
         Enabled = False
         TabOrder = 1
@@ -200,5 +194,30 @@ object FormMain: TFormMain
       Caption = 'Remove Buddy'
       OnClick = MenuItemRemoveBuddyClick
     end
+    object MenuItemSeparator1: TMenuItem
+      Caption = '-'
+    end
+    object MenuItemRequestAvatar: TMenuItem
+      Caption = 'Request Avatar'
+      OnClick = MenuItemRequestAvatarClick
+    end
+  end
+  object PopupMenuAvatar: TPopupMenu
+    Left = 720
+    Top = 80
+    object MenuItemSetAvatar: TMenuItem
+      Caption = 'Set Avatar...'
+      OnClick = MenuItemSetAvatarClick
+    end
+    object MenuItemClearAvatar: TMenuItem
+      Caption = 'Clear Avatar'
+      OnClick = MenuItemClearAvatarClick
+    end
+  end
+  object OpenDialogAvatar: TOpenDialog
+    Title = 'Select Avatar Image'
+    Filter = 'Image Files|*.png;*.jpg;*.jpeg;*.gif;*.bmp|All Files|*.*'
+    Left = 400
+    Top = 350
   end
 end

@@ -6,44 +6,54 @@ interface
 
 uses
   Classes, SysUtils, Forms, Controls, Graphics, Dialogs, StdCtrls, ExtCtrls,
-  ComCtrls, Menus, Barev, BarevTypes,
-  BarevIMTypes, BarevIMConfig, BarevIMChat, BarevIMContacts, BarevIMAddBuddyDlg;
+  ComCtrls, Menus, LCLType, LCLIntf, Barev, BarevTypes,
+  BarevIMTypes, BarevIMConfig, BarevIMChat, BarevIMContacts, BarevIMAddBuddyDlg,
+  BarevIMAvatar, BarevIMLoginDlg;
 
 type
 
   { TFormMain }
 
   TFormMain = class(TForm)
-    ButtonConnect: TButton;
+    ButtonDisconnect: TButton;
     ButtonSend: TButton;
     ButtonAddBuddy: TButton;
-    EditMessage: TEdit;
-    EditMyNick: TEdit;
-    EditMyIPv6: TEdit;
-    EditMyPort: TEdit;
-    LabelMyNick: TLabel;
-    LabelMyIPv6: TLabel;
-    LabelMyPort: TLabel;
+    ComboBoxStatus: TComboBox;
+    MemoMessage: TMemo;
+    ImageAvatar: TImage;
+    LabelUserInfo: TLabel;
     LabelBuddies: TLabel;
     ListBoxBuddies: TListBox;
     MemoLog: TMemo;
+    OpenDialogAvatar: TOpenDialog;
     PageControlChats: TPageControl;
     Panel1: TPanel;
     Panel2: TPanel;
     Panel3: TPanel;
     Panel4: TPanel;
+    PopupMenuAvatar: TPopupMenu;
+    MenuItemSetAvatar: TMenuItem;
+    MenuItemClearAvatar: TMenuItem;
     Splitter1: TSplitter;
     Timer1: TTimer;
     PopupMenuBuddy: TPopupMenu;
     MenuItemRemoveBuddy: TMenuItem;
+    MenuItemSeparator1: TMenuItem;
+    MenuItemRequestAvatar: TMenuItem;
     
     procedure ButtonAddBuddyClick(Sender: TObject);
+    procedure ButtonDisconnectClick(Sender: TObject);
+    procedure ComboBoxStatusChange(Sender: TObject);
     procedure MenuItemRemoveBuddyClick(Sender: TObject);
-    procedure ButtonConnectClick(Sender: TObject);
+    procedure MenuItemRequestAvatarClick(Sender: TObject);
+    procedure MenuItemSetAvatarClick(Sender: TObject);
+    procedure MenuItemClearAvatarClick(Sender: TObject);
     procedure ButtonSendClick(Sender: TObject);
-    procedure EditMessageKeyPress(Sender: TObject; var Key: char);
+    procedure MemoMessageKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
+    procedure FormShow(Sender: TObject);
+    procedure ImageAvatarClick(Sender: TObject);
     procedure ListBoxBuddiesDblClick(Sender: TObject);
     procedure PageControlChatsCloseTabClicked(Sender: TObject);
     procedure Timer1Timer(Sender: TObject);
@@ -51,22 +61,31 @@ type
     FClient: TBarevClient;
     FConnected: Boolean;
     FCurrentBuddy: TBarevBuddy;
+    FFirstShow: Boolean;
 
     FConfig: TBarevConfig;
     FChatManager: TChatTabManager;
     FContactManager: TContactManager;
+    FAvatarManager: TAvatarManager;
 
     procedure OnMessageReceived(Buddy: TBarevBuddy; const MessageText: string);
     procedure OnBuddyStatus(Buddy: TBarevBuddy; OldStatus, NewStatus: TBuddyStatus);
+    procedure OnTypingNotification(Buddy: TBarevBuddy; IsTyping: Boolean);
     procedure OnLog(const LogLevel, Message: string);
 
     procedure OnContactLog(const Message: string);
+    procedure OnAvatarLog(const Message: string);
+
+    function DoConnect(const ANick, AIPv6: string; APort: Integer): Boolean;
+    procedure DoDisconnect;
+    procedure ShowLoginDialog;
 
     procedure UpdateBuddyList;
-    procedure ApplyConfigToUI;
-    procedure ApplyUIToConfig;
+    procedure UpdateMyAvatarDisplay;
+    procedure UpdateUserInfoLabel;
     procedure SetConnectedState(Connected: Boolean);
     procedure LogMessage(const Message: string);
+    procedure DrawDefaultAvatar;
   public
   end;
 
@@ -79,6 +98,38 @@ implementation
 
 { TFormMain }
 
+procedure TFormMain.DrawDefaultAvatar;
+var
+  Bmp: TBitmap;
+  CenterX, CenterY: Integer;
+begin
+  Bmp := TBitmap.Create;
+  try
+    Bmp.Width := 48;
+    Bmp.Height := 48;
+    
+    Bmp.Canvas.Brush.Color := clSilver;
+    Bmp.Canvas.FillRect(0, 0, 48, 48);
+    
+    CenterX := 24;
+    CenterY := 24;
+    
+    Bmp.Canvas.Brush.Color := clGray;
+    Bmp.Canvas.Pen.Color := clGray;
+    Bmp.Canvas.Ellipse(CenterX - 8, 8, CenterX + 8, 24);
+    Bmp.Canvas.Ellipse(CenterX - 16, 26, CenterX + 16, 58);
+    
+    Bmp.Canvas.Brush.Style := bsClear;
+    Bmp.Canvas.Pen.Color := clDkGray;
+    Bmp.Canvas.Pen.Width := 2;
+    Bmp.Canvas.Rectangle(0, 0, 48, 48);
+    
+    ImageAvatar.Picture.Bitmap.Assign(Bmp);
+  finally
+    Bmp.Free;
+  end;
+end;
+
 procedure TFormMain.FormCreate(Sender: TObject);
 var
   ConfigPath: string;
@@ -86,80 +137,201 @@ begin
   FConnected := False;
   FClient := nil;
   FCurrentBuddy := nil;
+  FFirstShow := True;
 
   ConfigPath := DetermineConfigFilePath;
   FConfig := TBarevConfig.Create(ConfigPath);
   FChatManager := TChatTabManager.Create(PageControlChats);
   FContactManager := nil;
+  FAvatarManager := nil;
 
   Caption := 'barev IM';
   Position := poScreenCenter;
-  Width := 800;
-  Height := 600;
+
+  OpenDialogAvatar.Title := 'Select Avatar Image';
+  OpenDialogAvatar.Filter := 'Image Files|*.png;*.jpg;*.jpeg;*.gif;*.bmp|All Files|*.*';
 
   FConfig.Load;
-  ApplyConfigToUI;
+
+  Left := FConfig.WindowLeft;
+  Top := FConfig.WindowTop;
+  Width := FConfig.WindowWidth;
+  Height := FConfig.WindowHeight;
   
   MemoLog.ReadOnly := True;
+
+  DrawDefaultAvatar;
+
   SetConnectedState(False);
   
   LogMessage('Configuration file: ' + FConfig.ConfigFile);
+end;
 
-  if FConfig.IsValidForAutoConnect then
+procedure TFormMain.FormShow(Sender: TObject);
+begin
+  if FFirstShow then
   begin
-    LogMessage('Auto-connecting...');
+    FFirstShow := False;
     Application.ProcessMessages;
-    Sleep(100);
-    ButtonConnectClick(nil);
+
+    if FConfig.AutoConnect and FConfig.IsValidForAutoConnect then
+    begin
+      LogMessage('Auto-connecting...');
+      if not DoConnect(FConfig.Nick, FConfig.IPv6, FConfig.Port) then
+      begin
+        LogMessage('Auto-connect failed, showing login dialog');
+        ShowLoginDialog;
+      end;
+    end
+    else
+    begin
+      ShowLoginDialog;
+    end;
   end;
 end;
 
 procedure TFormMain.FormDestroy(Sender: TObject);
 begin
-  if Assigned(FClient) then
-  begin
-    if Assigned(FContactManager) then
-      FContactManager.SaveContacts;
-    FClient.Stop;
-    FClient.Free;
-  end;
+  if FConnected then
+    DoDisconnect;
 
-  ApplyUIToConfig;
+  FConfig.WindowLeft := Left;
+  FConfig.WindowTop := Top;
+  FConfig.WindowWidth := Width;
+  FConfig.WindowHeight := Height;
   FConfig.Save;
 
+  FAvatarManager.Free;
   FContactManager.Free;
   FChatManager.Free;
   FConfig.Free;
 end;
 
-procedure TFormMain.ApplyConfigToUI;
+procedure TFormMain.ShowLoginDialog;
+var
+  Nick, IPv6: string;
+  Port: Integer;
+  AutoConnect: Boolean;
 begin
-  EditMyNick.Text := FConfig.Nick;
-  EditMyIPv6.Text := FConfig.IPv6;
-  EditMyPort.Text := IntToStr(FConfig.Port);
+  Nick := FConfig.Nick;
+  IPv6 := FConfig.IPv6;
+  Port := FConfig.Port;
+  AutoConnect := FConfig.AutoConnect;
   
-  Left := FConfig.WindowLeft;
-  Top := FConfig.WindowTop;
-  Width := FConfig.WindowWidth;
-  Height := FConfig.WindowHeight;
+  if TLoginDialog.Execute(Nick, IPv6, Port, AutoConnect) then
+  begin
+    FConfig.Nick := Nick;
+    FConfig.IPv6 := IPv6;
+    FConfig.Port := Port;
+    FConfig.AutoConnect := AutoConnect;
+    FConfig.Save;
+
+    if not DoConnect(Nick, IPv6, Port) then
+    begin
+      if MessageDlg('Connection Failed', 
+        'Failed to connect. Try again?',
+        mtConfirmation, [mbYes, mbNo], 0) = mrYes then
+        ShowLoginDialog
+      else
+        Application.Terminate;
+    end;
+  end
+  else
+  begin
+    Application.Terminate;
+  end;
 end;
 
-procedure TFormMain.ApplyUIToConfig;
-var
-  Port: Integer;
+function TFormMain.DoConnect(const ANick, AIPv6: string; APort: Integer): Boolean;
 begin
-  FConfig.Nick := EditMyNick.Text;
-  FConfig.IPv6 := EditMyIPv6.Text;
+  Result := False;
   
-  if TryStrToInt(Trim(EditMyPort.Text), Port) then
-    FConfig.Port := Port
-  else
-    FConfig.Port := DEFAULT_PORT;
+  try
+    FClient := TBarevClient.Create(ANick, AIPv6, APort);
+    FClient.OnMessageReceived := @OnMessageReceived;
+    FClient.OnBuddyStatus := @OnBuddyStatus;
+    FClient.OnTypingNotification := @OnTypingNotification;
+    FClient.OnLog := @OnLog;
+    
+    if FClient.Start then
+    begin
+      SetConnectedState(True);
+      LogMessage('=== Connected as ' + FClient.MyJID + ' on port ' + IntToStr(APort) + ' ===');
+
+      FContactManager := TContactManager.Create(FClient, FConfig.GetContactsFilePath);
+      FContactManager.OnLog := @OnContactLog;
+      FContactManager.LoadContacts;
+
+      FAvatarManager := TAvatarManager.Create(FClient);
+      FAvatarManager.OnLog := @OnAvatarLog;
+
+      if (FConfig.AvatarPath <> '') and FileExists(FConfig.AvatarPath) then
+      begin
+        if FAvatarManager.SetMyAvatar(FConfig.AvatarPath) then
+          LogMessage('Loaded saved avatar: ' + FConfig.AvatarPath);
+      end;
+      
+      UpdateBuddyList;
+      UpdateMyAvatarDisplay;
+      UpdateUserInfoLabel;
+      
+      Result := True;
+    end
+    else
+    begin
+      ShowMessage('Failed to start Barev client. Port ' + IntToStr(APort) + ' may be in use.');
+      FClient.Free;
+      FClient := nil;
+    end;
+  except
+    on E: Exception do
+    begin
+      ShowMessage('Error starting client: ' + E.Message);
+      if Assigned(FClient) then
+      begin
+        FClient.Free;
+        FClient := nil;
+      end;
+    end;
+  end;
+end;
+
+procedure TFormMain.DoDisconnect;
+begin
+  if Assigned(FContactManager) then
+  begin
+    FContactManager.SaveContacts;
+    FreeAndNil(FContactManager);
+  end;
   
-  FConfig.WindowLeft := Left;
-  FConfig.WindowTop := Top;
-  FConfig.WindowWidth := Width;
-  FConfig.WindowHeight := Height;
+  FreeAndNil(FAvatarManager);
+
+  if Assigned(FClient) then
+  begin
+    FClient.Stop;
+    FreeAndNil(FClient);
+  end;
+  
+  FCurrentBuddy := nil;
+  SetConnectedState(False);
+  
+  ListBoxBuddies.Clear;
+  FChatManager.CloseAllTabs;
+  FChatManager.ClearAllHistory;
+  
+  DrawDefaultAvatar;
+  UpdateUserInfoLabel;
+  
+  LogMessage('=== Disconnected ===');
+end;
+
+procedure TFormMain.ButtonDisconnectClick(Sender: TObject);
+begin
+  if FConnected then
+  begin
+    DoDisconnect;
+    ShowLoginDialog;
+  end;
 end;
 
 procedure TFormMain.SetConnectedState(Connected: Boolean);
@@ -168,29 +340,35 @@ begin
   
   if Connected then
   begin
-    ButtonConnect.Caption := 'Disconnect';
-    EditMyNick.Enabled := False;
-    EditMyIPv6.Enabled := False;
-    EditMyPort.Enabled := False;
+    ButtonDisconnect.Enabled := True;
     ButtonAddBuddy.Enabled := True;
+    ComboBoxStatus.Enabled := True;
+    ComboBoxStatus.ItemIndex := 0;
     Timer1.Enabled := True;
   end
   else
   begin
-    ButtonConnect.Caption := 'Connect';
-    EditMyNick.Enabled := True;
-    EditMyIPv6.Enabled := True;
-    EditMyPort.Enabled := True;
+    ButtonDisconnect.Enabled := False;
     ButtonAddBuddy.Enabled := False;
     ButtonSend.Enabled := False;
-    EditMessage.Enabled := False;
+    MemoMessage.Enabled := False;
+    ComboBoxStatus.Enabled := False;
+    ComboBoxStatus.ItemIndex := -1;
     Timer1.Enabled := False;
   end;
 end;
 
+procedure TFormMain.UpdateUserInfoLabel;
+begin
+  if FConnected and Assigned(FClient) then
+    LabelUserInfo.Caption := FClient.MyJID
+  else
+    LabelUserInfo.Caption := 'Not connected';
+end;
+
 procedure TFormMain.LogMessage(const Message: string);
 begin
-  MemoLog.Lines.Add(Message);
+  MemoLog.Lines.Add('[' + TimeToStr(Now) + '] ' + Message);
 end;
 
 procedure TFormMain.OnContactLog(const Message: string);
@@ -198,101 +376,9 @@ begin
   LogMessage(Message);
 end;
 
-procedure TFormMain.ButtonConnectClick(Sender: TObject);
-var
-  Port: Integer;
+procedure TFormMain.OnAvatarLog(const Message: string);
 begin
-  if not FConnected then
-  begin
-    if Trim(EditMyNick.Text) = '' then
-    begin
-      ShowMessage('Please enter your nickname');
-      EditMyNick.SetFocus;
-      Exit;
-    end;
-    
-    if Trim(EditMyIPv6.Text) = '' then
-    begin
-      ShowMessage('Please enter your IPv6 address');
-      EditMyIPv6.SetFocus;
-      Exit;
-    end;
-    
-    if not TryStrToInt(Trim(EditMyPort.Text), Port) then
-    begin
-      ShowMessage('Invalid port number');
-      EditMyPort.SetFocus;
-      Exit;
-    end;
-    
-    if (Port < 1) or (Port > 65535) then
-    begin
-      ShowMessage('Port must be between 1 and 65535');
-      EditMyPort.SetFocus;
-      Exit;
-    end;
-    
-    try
-      FClient := TBarevClient.Create(EditMyNick.Text, EditMyIPv6.Text, Port);
-      FClient.OnMessageReceived := @OnMessageReceived;
-      FClient.OnBuddyStatus := @OnBuddyStatus;
-      FClient.OnLog := @OnLog;
-      
-      if FClient.Start then
-      begin
-        SetConnectedState(True);
-        LogMessage('=== Connected on port ' + IntToStr(Port) + ' ===');
-
-        FContactManager := TContactManager.Create(FClient, FConfig.GetContactsFilePath);
-        FContactManager.OnLog := @OnContactLog;
-        FContactManager.LoadContacts;
-        
-        UpdateBuddyList;
-      end
-      else
-      begin
-        ShowMessage('Failed to start Barev client. Port ' + IntToStr(Port) + ' may be in use.');
-        FClient.Free;
-        FClient := nil;
-      end;
-    except
-      on E: Exception do
-      begin
-        ShowMessage('Error starting client: ' + E.Message);
-        if Assigned(FClient) then
-        begin
-          FClient.Free;
-          FClient := nil;
-        end;
-      end;
-    end;
-  end
-  else
-  begin
-    if Assigned(FContactManager) then
-    begin
-      FContactManager.SaveContacts;
-      FContactManager.Free;
-      FContactManager := nil;
-    end;
-    
-    if Assigned(FClient) then
-    begin
-      FClient.Stop;
-      FClient.Free;
-      FClient := nil;
-    end;
-    
-    FCurrentBuddy := nil;
-    SetConnectedState(False);
-    
-    ListBoxBuddies.Clear;
-    FChatManager.CloseAllTabs;
-    FChatManager.ClearAllHistory;
-    MemoLog.Clear;
-    
-    LogMessage('=== Disconnected ===');
-  end;
+  LogMessage('[Avatar] ' + Message);
 end;
 
 procedure TFormMain.ButtonAddBuddyClick(Sender: TObject);
@@ -302,7 +388,7 @@ var
 begin
   if not FConnected then
     Exit;
-
+  
   if TAddBuddyDialog.Execute(BuddyNick, BuddyIPv6, BuddyPort) then
   begin
     try
@@ -314,6 +400,28 @@ begin
         ShowMessage('Error adding buddy: ' + E.Message);
     end;
   end;
+end;
+
+procedure TFormMain.ComboBoxStatusChange(Sender: TObject);
+var
+  NewStatus: TBuddyStatus;
+begin
+  if not FConnected or not Assigned(FClient) then
+    Exit;
+  
+  case ComboBoxStatus.ItemIndex of
+    0: NewStatus := bsAvailable;
+    1: NewStatus := bsAway;
+    2: NewStatus := bsExtendedAway;
+    3: NewStatus := bsDoNotDisturb;
+  else
+    NewStatus := bsAvailable;
+  end;
+  
+  if FClient.SendPresence(NewStatus, '') then
+    LogMessage('Status changed to: ' + StatusToDisplayString(NewStatus))
+  else
+    LogMessage('Failed to change status');
 end;
 
 procedure TFormMain.MenuItemRemoveBuddyClick(Sender: TObject);
@@ -353,9 +461,9 @@ begin
     begin
       FCurrentBuddy := nil;
       ButtonSend.Enabled := False;
-      EditMessage.Enabled := False;
+      MemoMessage.Enabled := False;
     end;
-
+    
     for I := 0 to PageControlChats.PageCount - 1 do
     begin
       if PageControlChats.Pages[I].Caption = BuddyNick then
@@ -380,6 +488,65 @@ begin
   end;
 end;
 
+procedure TFormMain.MenuItemRequestAvatarClick(Sender: TObject);
+var
+  Index: Integer;
+  BuddyNick: string;
+  Buddy: TBarevBuddy;
+begin
+  if not FConnected then
+    Exit;
+  
+  Index := ListBoxBuddies.ItemIndex;
+  if Index < 0 then
+  begin
+    ShowMessage('Please select a buddy');
+    Exit;
+  end;
+  
+  BuddyNick := Copy(ListBoxBuddies.Items[Index], 1, Pos(' ', ListBoxBuddies.Items[Index]) - 1);
+  Buddy := FContactManager.FindBuddyByNick(BuddyNick);
+  
+  if Assigned(Buddy) then
+    FAvatarManager.RequestBuddyAvatar(Buddy.JID);
+end;
+
+procedure TFormMain.MenuItemSetAvatarClick(Sender: TObject);
+begin
+  if not FConnected then
+    Exit;
+  
+  if OpenDialogAvatar.Execute then
+  begin
+    if FAvatarManager.SetMyAvatar(OpenDialogAvatar.FileName) then
+    begin
+      FConfig.AvatarPath := OpenDialogAvatar.FileName;
+      UpdateMyAvatarDisplay;
+    end;
+  end;
+end;
+
+procedure TFormMain.MenuItemClearAvatarClick(Sender: TObject);
+begin
+  if not FConnected then
+    Exit;
+  
+  FAvatarManager.ClearMyAvatar;
+  FConfig.AvatarPath := '';
+  DrawDefaultAvatar;
+end;
+
+procedure TFormMain.ImageAvatarClick(Sender: TObject);
+var
+  Pt: TPoint;
+begin
+  if FConnected then
+  begin
+    Pt := ImageAvatar.ClientToScreen(Point(0, ImageAvatar.Height));
+    PopupMenuAvatar.PopUp(Pt.X, Pt.Y);
+  end;
+end;
+
 procedure TFormMain.ButtonSendClick(Sender: TObject);
 var
   MessageText: string;
@@ -388,30 +555,30 @@ begin
   if not Assigned(FCurrentBuddy) then
     Exit;
   
-  MessageText := Trim(EditMessage.Text);
+  MessageText := Trim(MemoMessage.Text);
   if MessageText = '' then
     Exit;
   
   try
     FClient.SendMessage(FCurrentBuddy.JID, MessageText);
-
-    TabSheet := FChatManager.GetOrCreateTab(FCurrentBuddy.Nick, FCurrentBuddy.JID);
-    FChatManager.AddMessageToTab(TabSheet, EditMyNick.Text, MessageText, False);
-    FChatManager.SaveMessageToHistory(FCurrentBuddy.JID, EditMyNick.Text, MessageText, False);
     
-    EditMessage.Clear;
-    EditMessage.SetFocus;
+    TabSheet := FChatManager.GetOrCreateTab(FCurrentBuddy.Nick, FCurrentBuddy.JID);
+    FChatManager.AddMessageToTab(TabSheet, FConfig.Nick, MessageText, False);
+    FChatManager.SaveMessageToHistory(FCurrentBuddy.JID, FConfig.Nick, MessageText, False);
+    
+    MemoMessage.Clear;
+    MemoMessage.SetFocus;
   except
     on E: Exception do
       ShowMessage('Error sending message: ' + E.Message);
   end;
 end;
 
-procedure TFormMain.EditMessageKeyPress(Sender: TObject; var Key: char);
+procedure TFormMain.MemoMessageKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
 begin
-  if Key = #13 then
+  if (Key = 13) and (ssCtrl in Shift) then
   begin
-    Key := #0;
+    Key := 0;
     ButtonSendClick(Sender);
   end;
 end;
@@ -433,7 +600,7 @@ begin
   if Assigned(Buddy) then
   begin
     FCurrentBuddy := Buddy;
-
+    
     TabSheet := FChatManager.GetOrCreateTab(Buddy.Nick, Buddy.JID);
     PageControlChats.ActivePage := TabSheet;
     
@@ -443,8 +610,8 @@ begin
       FClient.ConnectToBuddy(FCurrentBuddy.JID);
       
       ButtonSend.Enabled := True;
-      EditMessage.Enabled := True;
-      EditMessage.SetFocus;
+      MemoMessage.Enabled := True;
+      MemoMessage.SetFocus;
       
       LogMessage('Connecting to: ' + FCurrentBuddy.Nick);
     except
@@ -463,12 +630,12 @@ begin
   begin
     TabSheet := PageControlChats.ActivePage;
     TabCaption := TabSheet.Caption;
-
+    
     if Assigned(FCurrentBuddy) and (TabCaption = FCurrentBuddy.Nick) then
     begin
       FCurrentBuddy := nil;
       ButtonSend.Enabled := False;
-      EditMessage.Enabled := False;
+      MemoMessage.Enabled := False;
     end;
     
     FChatManager.CloseTab(TabSheet);
@@ -494,10 +661,10 @@ var
   TabSheet: TTabSheet;
 begin
   FChatManager.SaveMessageToHistory(Buddy.JID, Buddy.Nick, MessageText, True);
-
+  
   TabSheet := FChatManager.GetOrCreateTab(Buddy.Nick, Buddy.JID);
   FChatManager.AddMessageToTab(TabSheet, Buddy.Nick, MessageText, True);
-
+  
   if not Assigned(FCurrentBuddy) or (FCurrentBuddy.JID <> Buddy.JID) then
     LogMessage('Message from ' + Buddy.Nick);
 end;
@@ -507,14 +674,26 @@ begin
   UpdateBuddyList;
   
   if NewStatus <> bsOffline then
-    LogMessage('Buddy online: ' + Buddy.Nick)
+    LogMessage('Buddy ' + Buddy.Nick + ': ' + StatusToDisplayString(NewStatus))
   else
     LogMessage('Buddy offline: ' + Buddy.Nick);
 end;
 
+procedure TFormMain.OnTypingNotification(Buddy: TBarevBuddy; IsTyping: Boolean);
+var
+  TabSheet: TTabSheet;
+begin
+  TabSheet := FChatManager.GetOrCreateTab(Buddy.Nick, Buddy.JID);
+  
+  if IsTyping then
+    TabSheet.Caption := Buddy.Nick + ' (typing...)'
+  else
+    TabSheet.Caption := Buddy.Nick;
+end;
+
 procedure TFormMain.OnLog(const LogLevel, Message: string);
 begin
-  MemoLog.Lines.Add('[' + TimeToStr(Now) + '] ' + LogLevel + ': ' + Message);
+  MemoLog.Lines.Add('[' + LogLevel + '] ' + Message);
 end;
 
 procedure TFormMain.UpdateBuddyList;
@@ -538,13 +717,29 @@ begin
   for I := 0 to BuddyCount - 1 do
   begin
     Buddy := FContactManager.GetBuddyByIndex(I);
-    if Buddy.Status <> bsOffline then
-      Status := '[Online]'
-    else
-      Status := '[Offline]';
-    
+    Status := StatusToIcon(Buddy.Status) + ' ' + StatusToDisplayString(Buddy.Status);
     ListBoxBuddies.Items.Add(Buddy.Nick + ' ' + Status);
   end;
+end;
+
+procedure TFormMain.UpdateMyAvatarDisplay;
+var
+  AvatarPath: string;
+begin
+  if not Assigned(FAvatarManager) then
+    Exit;
+  
+  AvatarPath := FAvatarManager.GetMyAvatarPath;
+  if (AvatarPath <> '') and FileExists(AvatarPath) then
+  begin
+    try
+      ImageAvatar.Picture.LoadFromFile(AvatarPath);
+    except
+      DrawDefaultAvatar;
+    end;
+  end
+  else
+    DrawDefaultAvatar;
 end;
 
 end.

@@ -73,7 +73,11 @@ fpc -Fu/path/to/barev/units barevim.lpr
    - Messages appear in the chat window with timestamps
 
 <picture>
-    <img alt="screenshot" src="screenshot.png" />
+    <img alt="screenshot" src="media/login.png" />
+</picture>
+
+<picture>
+    <img alt="screenshot" src="media/add_buddy.png" />
 </picture>
 
 ## Configuration and Persistence
@@ -89,6 +93,7 @@ The application automatically saves your settings to a configuration file:
 Nick=alice
 IPv6=201:af82:9f2f:7809::1
 Port=5299
+AutoConnect=1
 
 [Window]
 Left=100
