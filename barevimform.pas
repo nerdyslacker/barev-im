@@ -7,7 +7,7 @@ interface
 uses
   Classes, SysUtils, Forms, Controls, Graphics, Dialogs, StdCtrls, ExtCtrls,
   ComCtrls, Menus, Barev, BarevTypes,
-  BarevIMTypes, BarevIMConfig, BarevIMChat, BarevIMContacts;
+  BarevIMTypes, BarevIMConfig, BarevIMChat, BarevIMContacts, BarevIMAddBuddyDlg;
 
 type
 
@@ -297,43 +297,21 @@ end;
 
 procedure TFormMain.ButtonAddBuddyClick(Sender: TObject);
 var
-  BuddyNick, BuddyIPv6, BuddyPortStr: string;
+  BuddyNick, BuddyIPv6: string;
   BuddyPort: Integer;
 begin
   if not FConnected then
     Exit;
-  
-  BuddyNick := '';
-  BuddyIPv6 := '';
-  BuddyPortStr := IntToStr(DEFAULT_PORT);
-  
-  if InputQuery('Add Buddy', 'Enter buddy nickname:', BuddyNick) then
+
+  if TAddBuddyDialog.Execute(BuddyNick, BuddyIPv6, BuddyPort) then
   begin
-    if Trim(BuddyNick) = '' then
-      Exit;
-    
-    if InputQuery('Add Buddy', 'Enter buddy IPv6 address:', BuddyIPv6) then
-    begin
-      if Trim(BuddyIPv6) = '' then
-        Exit;
-      
-      if InputQuery('Add Buddy', 'Enter buddy port (default ' + IntToStr(DEFAULT_PORT) + '):', BuddyPortStr) then
-      begin
-        if not TryStrToInt(Trim(BuddyPortStr), BuddyPort) then
-          BuddyPort := DEFAULT_PORT;
-        
-        if (BuddyPort < 1) or (BuddyPort > 65535) then
-          BuddyPort := DEFAULT_PORT;
-        
-        try
-          FContactManager.AddBuddy(BuddyNick, BuddyIPv6, BuddyPort);
-          FContactManager.SaveContacts;
-          UpdateBuddyList;
-        except
-          on E: Exception do
-            ShowMessage('Error adding buddy: ' + E.Message);
-        end;
-      end;
+    try
+      FContactManager.AddBuddy(BuddyNick, BuddyIPv6, BuddyPort);
+      FContactManager.SaveContacts;
+      UpdateBuddyList;
+    except
+      on E: Exception do
+        ShowMessage('Error adding buddy: ' + E.Message);
     end;
   end;
 end;
