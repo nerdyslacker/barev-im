@@ -5,7 +5,7 @@ unit BarevIMAvatar;
 interface
 
 uses
-  Classes, SysUtils, Graphics, Barev, BarevTypes;
+  Classes, SysUtils, Graphics, Barev;
 
 type
   TLogEvent = procedure(const Message: string) of object;

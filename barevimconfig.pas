@@ -19,6 +19,8 @@ type
     FWindowTop: Integer;
     FWindowWidth: Integer;
     FWindowHeight: Integer;
+    FAvatarPath: string;
+    FAutoConnect: Boolean;
   public
     constructor Create(const AConfigFile: string);
     
@@ -36,6 +38,8 @@ type
     property WindowTop: Integer read FWindowTop write FWindowTop;
     property WindowWidth: Integer read FWindowWidth write FWindowWidth;
     property WindowHeight: Integer read FWindowHeight write FWindowHeight;
+    property AvatarPath: string read FAvatarPath write FAvatarPath;
+    property AutoConnect: Boolean read FAutoConnect write FAutoConnect;
   end;
 
 { Helper function to determine config file path }
@@ -49,7 +53,7 @@ var
   ConfigParam: string;
 begin
   ConfigParam := '';
-  
+
   for I := 1 to ParamCount do
   begin
     if Pos('--config=', ParamStr(I)) = 1 then
@@ -77,7 +81,7 @@ constructor TBarevConfig.Create(const AConfigFile: string);
 begin
   inherited Create;
   FConfigFile := AConfigFile;
-  
+
   FNick := DEFAULT_NICK;
   FIPv6 := DEFAULT_IPV6;
   FPort := DEFAULT_PORT;
@@ -85,6 +89,8 @@ begin
   FWindowTop := 100;
   FWindowWidth := 800;
   FWindowHeight := 600;
+  FAvatarPath := '';
+  FAutoConnect := False;
 end;
 
 procedure TBarevConfig.Load;
@@ -99,6 +105,8 @@ begin
     FNick := Ini.ReadString('User', 'Nick', DEFAULT_NICK);
     FIPv6 := Ini.ReadString('User', 'IPv6', DEFAULT_IPV6);
     FPort := Ini.ReadInteger('User', 'Port', DEFAULT_PORT);
+    FAvatarPath := Ini.ReadString('User', 'AvatarPath', '');
+    FAutoConnect := Ini.ReadBool('User', 'AutoConnect', False);
     
     FWindowLeft := Ini.ReadInteger('Window', 'Left', FWindowLeft);
     FWindowTop := Ini.ReadInteger('Window', 'Top', FWindowTop);
@@ -118,6 +126,8 @@ begin
     Ini.WriteString('User', 'Nick', FNick);
     Ini.WriteString('User', 'IPv6', FIPv6);
     Ini.WriteInteger('User', 'Port', FPort);
+    Ini.WriteString('User', 'AvatarPath', FAvatarPath);
+    Ini.WriteBool('User', 'AutoConnect', FAutoConnect);
     
     Ini.WriteInteger('Window', 'Left', FWindowLeft);
     Ini.WriteInteger('Window', 'Top', FWindowTop);
