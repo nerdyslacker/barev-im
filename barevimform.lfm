@@ -69,6 +69,15 @@ object FormMain: TFormMain
       TabOrder = 1
       OnClick = ButtonDisconnectClick
     end
+    object ButtonToggleLogs: TButton
+      Left = 320
+      Height = 28
+      Top = 28
+      Width = 80
+      Caption = 'Show Logs'
+      TabOrder = 2
+      OnClick = ButtonToggleLogsClick
+    end
   end
   object Panel2: TPanel
     Left = 0
@@ -94,14 +103,16 @@ object FormMain: TFormMain
       Top = 20
       Width = 198
       Align = alClient
-      ItemHeight = 0
+      ItemHeight = 40
       ParentShowHint = False
       PopupMenu = PopupMenuBuddy
       ShowHint = True
+      Style = lbOwnerDrawFixed
       TabOrder = 0
       TopIndex = -1
       OnContextPopup = ListBoxBuddiesContextPopup
       OnDblClick = ListBoxBuddiesDblClick
+      OnDrawItem = ListBoxBuddiesDrawItem
       OnMouseMove = ListBoxBuddiesMouseMove
     end
     object ButtonAddBuddy: TButton
@@ -139,6 +150,7 @@ object FormMain: TFormMain
       Align = alClient
       Options = [nboShowCloseButtons]
       TabOrder = 0
+      OnChange = PageControlChatsChange
       OnCloseTabClicked = PageControlChatsCloseTabClicked
     end
     object Panel4: TPanel
@@ -182,6 +194,7 @@ object FormMain: TFormMain
       ReadOnly = True
       ScrollBars = ssVertical
       TabOrder = 2
+      Visible = False
     end
   end
   object Timer1: TTimer

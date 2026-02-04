@@ -7,8 +7,7 @@ interface
 uses
   Classes, SysUtils, Forms, Controls, Graphics, Dialogs, StdCtrls, ExtCtrls,
   ComCtrls, Menus, LCLType, LCLIntf, Barev, BarevTypes,
-  BarevIMTypes, BarevIMConfig, BarevIMChat, BarevIMContacts, BarevIMAddBuddyDlg,
-  BarevIMAvatar, BarevIMLoginDlg;
+  BarevIMTypes, BarevIMChat, BarevIMAddBuddyDlg, BarevIMLoginDlg;
 
 type
 
@@ -16,6 +15,7 @@ type
 
   TFormMain = class(TForm)
     ButtonDisconnect: TButton;
+    ButtonToggleLogs: TButton;
     ButtonSend: TButton;
     ButtonAddBuddy: TButton;
     ComboBoxStatus: TComboBox;
@@ -45,6 +45,7 @@ type
     
     procedure ButtonAddBuddyClick(Sender: TObject);
     procedure ButtonDisconnectClick(Sender: TObject);
+    procedure ButtonToggleLogsClick(Sender: TObject);
     procedure ComboBoxStatusChange(Sender: TObject);
     procedure MenuItemOpenChatClick(Sender: TObject);
     procedure MenuItemRemoveBuddyClick(Sender: TObject);
@@ -58,9 +59,12 @@ type
     procedure FormShow(Sender: TObject);
     procedure ImageAvatarClick(Sender: TObject);
     procedure ListBoxBuddiesDblClick(Sender: TObject);
+    procedure ListBoxBuddiesDrawItem(Control: TWinControl; Index: Integer;
+      ARect: TRect; State: TOwnerDrawState);
     procedure ListBoxBuddiesContextPopup(Sender: TObject; MousePos: TPoint;
       var Handled: Boolean);
     procedure ListBoxBuddiesMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
+    procedure PageControlChatsChange(Sender: TObject);
     procedure PageControlChatsCloseTabClicked(Sender: TObject);
     procedure Timer1Timer(Sender: TObject);
   private
@@ -69,34 +73,40 @@ type
     FCurrentBuddy: TBarevBuddy;
     FFirstShow: Boolean;
     FRightClickIndex: Integer;
+    FDefaultAvatar: TBitmap;
+    FConfigPath: string;
+    
+    FWindowLeft: Integer;
+    FWindowTop: Integer;
+    FWindowWidth: Integer;
+    FWindowHeight: Integer;
 
-    FConfig: TBarevConfig;
     FChatManager: TChatTabManager;
-    FContactManager: TContactManager;
-    FAvatarManager: TAvatarManager;
 
     procedure OnMessageReceived(Buddy: TBarevBuddy; const MessageText: string);
     procedure OnBuddyStatus(Buddy: TBarevBuddy; OldStatus, NewStatus: TBuddyStatus);
     procedure OnTypingNotification(Buddy: TBarevBuddy; IsTyping: Boolean);
     procedure OnLog(const LogLevel, Message: string);
 
-    procedure OnContactLog(const Message: string);
-    procedure OnAvatarLog(const Message: string);
-
     function DoConnect(const ANick, AIPv6: string; APort: Integer): Boolean;
     procedure DoDisconnect;
     procedure ShowLoginDialog;
+    
+    procedure LoadWindowSettings;
+    procedure SaveWindowSettings;
 
     procedure UpdateBuddyList;
     procedure UpdateMyAvatarDisplay;
     procedure UpdateUserInfoLabel;
     procedure SetConnectedState(Connected: Boolean);
     procedure LogMessage(const Message: string);
-    procedure DrawDefaultAvatar;
+    procedure CreateDefaultAvatar;
     function GetBuddyNickFromListIndex(Index: Integer): string;
     procedure UpdateTabCaption(const BuddyNick: string; Status: TBuddyStatus; IsTyping: Boolean);
     function FindTabByBuddyNick(const BuddyNick: string): TTabSheet;
     procedure OpenChatWithBuddy(Index: Integer);
+    function GetBuddyAvatar(Buddy: TBarevBuddy): TBitmap;
+    function FindBuddyByNick(const Nick: string): TBarevBuddy;
   public
   end;
 
@@ -105,57 +115,90 @@ var
 
 implementation
 
+uses
+  IniFiles;
+
 {$R *.lfm}
+
+const
+  BUDDY_ITEM_HEIGHT = 40;
+  AVATAR_SIZE = 32;
 
 { TFormMain }
 
-procedure TFormMain.DrawDefaultAvatar;
+procedure TFormMain.CreateDefaultAvatar;
 var
-  Bmp: TBitmap;
   CenterX, CenterY: Integer;
 begin
-  Bmp := TBitmap.Create;
-  try
-    Bmp.Width := 48;
-    Bmp.Height := 48;
-    
-    Bmp.Canvas.Brush.Color := clSilver;
-    Bmp.Canvas.FillRect(0, 0, 48, 48);
-    
-    CenterX := 24;
-    CenterY := 24;
-    
-    Bmp.Canvas.Brush.Color := clGray;
-    Bmp.Canvas.Pen.Color := clGray;
-    Bmp.Canvas.Ellipse(CenterX - 8, 8, CenterX + 8, 24);
-    Bmp.Canvas.Ellipse(CenterX - 16, 26, CenterX + 16, 58);
-    
-    Bmp.Canvas.Brush.Style := bsClear;
-    Bmp.Canvas.Pen.Color := clDkGray;
-    Bmp.Canvas.Pen.Width := 2;
-    Bmp.Canvas.Rectangle(0, 0, 48, 48);
-    
-    ImageAvatar.Picture.Bitmap.Assign(Bmp);
-  finally
-    Bmp.Free;
+  FDefaultAvatar := TBitmap.Create;
+  FDefaultAvatar.Width := AVATAR_SIZE;
+  FDefaultAvatar.Height := AVATAR_SIZE;
+  
+  FDefaultAvatar.Canvas.Brush.Color := clSilver;
+  FDefaultAvatar.Canvas.FillRect(0, 0, AVATAR_SIZE, AVATAR_SIZE);
+  
+  CenterX := AVATAR_SIZE div 2;
+  CenterY := AVATAR_SIZE div 2;
+  
+  FDefaultAvatar.Canvas.Brush.Color := clGray;
+  FDefaultAvatar.Canvas.Pen.Color := clGray;
+  FDefaultAvatar.Canvas.Ellipse(CenterX - 5, 4, CenterX + 5, 14);
+  FDefaultAvatar.Canvas.Ellipse(CenterX - 10, 16, CenterX + 10, 38);
+  
+  FDefaultAvatar.Canvas.Brush.Style := bsClear;
+  FDefaultAvatar.Canvas.Pen.Color := clDkGray;
+  FDefaultAvatar.Canvas.Pen.Width := 1;
+  FDefaultAvatar.Canvas.Rectangle(0, 0, AVATAR_SIZE, AVATAR_SIZE);
+end;
+
+function TFormMain.GetBuddyAvatar(Buddy: TBarevBuddy): TBitmap;
+var
+  TempPic: TPicture;
+begin
+  Result := FDefaultAvatar;
+  
+  if not Assigned(Buddy) then
+    Exit;
+  
+  if (Buddy.AvatarPath <> '') and FileExists(Buddy.AvatarPath) then
+  begin
+    TempPic := TPicture.Create;
+    try
+      try
+        TempPic.LoadFromFile(Buddy.AvatarPath);
+        Result := TBitmap.Create;
+        Result.Width := AVATAR_SIZE;
+        Result.Height := AVATAR_SIZE;
+        Result.Canvas.StretchDraw(Rect(0, 0, AVATAR_SIZE, AVATAR_SIZE), TempPic.Graphic);
+      except
+        Result := FDefaultAvatar;
+      end;
+    finally
+      TempPic.Free;
+    end;
   end;
 end;
 
 procedure TFormMain.FormCreate(Sender: TObject);
-var
-  ConfigPath: string;
 begin
   FConnected := False;
   FClient := nil;
   FCurrentBuddy := nil;
   FFirstShow := True;
   FRightClickIndex := -1;
+  
+  FWindowLeft := 100;
+  FWindowTop := 100;
+  FWindowWidth := 800;
+  FWindowHeight := 600;
 
-  ConfigPath := DetermineConfigFilePath;
-  FConfig := TBarevConfig.Create(ConfigPath);
+  CreateDefaultAvatar;
+  
+  FConfigPath := GetUserDir + '.barev' + PathDelim + 'barev.ini';
+  if not DirectoryExists(GetUserDir + '.barev') then
+    ForceDirectories(GetUserDir + '.barev');
+
   FChatManager := TChatTabManager.Create(PageControlChats);
-  FContactManager := nil;
-  FAvatarManager := nil;
 
   Caption := 'barev IM';
   Position := poScreenCenter;
@@ -163,22 +206,59 @@ begin
   OpenDialogAvatar.Title := 'Select Avatar Image';
   OpenDialogAvatar.Filter := 'Image Files|*.png;*.jpg;*.jpeg;*.gif;*.bmp|All Files|*.*';
 
-  FConfig.Load;
+  LoadWindowSettings;
 
-  Left := FConfig.WindowLeft;
-  Top := FConfig.WindowTop;
-  Width := FConfig.WindowWidth;
-  Height := FConfig.WindowHeight;
+  Left := FWindowLeft;
+  Top := FWindowTop;
+  Width := FWindowWidth;
+  Height := FWindowHeight;
   
   MemoLog.ReadOnly := True;
+  MemoLog.Visible := False;
+  ButtonToggleLogs.Caption := 'Show Logs';
   
   ListBoxBuddies.ShowHint := True;
+  ListBoxBuddies.Style := lbOwnerDrawFixed;
+  ListBoxBuddies.ItemHeight := BUDDY_ITEM_HEIGHT;
 
-  DrawDefaultAvatar;
+  ImageAvatar.Picture.Bitmap.Assign(FDefaultAvatar);
 
   SetConnectedState(False);
   
-  LogMessage('Configuration file: ' + FConfig.ConfigFile);
+  LogMessage('Configuration file: ' + FConfigPath);
+end;
+
+procedure TFormMain.LoadWindowSettings;
+var
+  Ini: TIniFile;
+begin
+  if not FileExists(FConfigPath) then
+    Exit;
+    
+  Ini := TIniFile.Create(FConfigPath);
+  try
+    FWindowLeft := Ini.ReadInteger('Window', 'Left', 100);
+    FWindowTop := Ini.ReadInteger('Window', 'Top', 100);
+    FWindowWidth := Ini.ReadInteger('Window', 'Width', 800);
+    FWindowHeight := Ini.ReadInteger('Window', 'Height', 600);
+  finally
+    Ini.Free;
+  end;
+end;
+
+procedure TFormMain.SaveWindowSettings;
+var
+  Ini: TIniFile;
+begin
+  Ini := TIniFile.Create(FConfigPath);
+  try
+    Ini.WriteInteger('Window', 'Left', Left);
+    Ini.WriteInteger('Window', 'Top', Top);
+    Ini.WriteInteger('Window', 'Width', Width);
+    Ini.WriteInteger('Window', 'Height', Height);
+  finally
+    Ini.Free;
+  end;
 end;
 
 procedure TFormMain.FormShow(Sender: TObject);
@@ -187,20 +267,7 @@ begin
   begin
     FFirstShow := False;
     Application.ProcessMessages;
-
-    if FConfig.AutoConnect and FConfig.IsValidForAutoConnect then
-    begin
-      LogMessage('Auto-connecting...');
-      if not DoConnect(FConfig.Nick, FConfig.IPv6, FConfig.Port) then
-      begin
-        LogMessage('Auto-connect failed, showing login dialog');
-        ShowLoginDialog;
-      end;
-    end
-    else
-    begin
-      ShowLoginDialog;
-    end;
+    ShowLoginDialog;
   end;
 end;
 
@@ -209,16 +276,10 @@ begin
   if FConnected then
     DoDisconnect;
 
-  FConfig.WindowLeft := Left;
-  FConfig.WindowTop := Top;
-  FConfig.WindowWidth := Width;
-  FConfig.WindowHeight := Height;
-  FConfig.Save;
+  SaveWindowSettings;
 
-  FAvatarManager.Free;
-  FContactManager.Free;
+  FDefaultAvatar.Free;
   FChatManager.Free;
-  FConfig.Free;
 end;
 
 procedure TFormMain.ShowLoginDialog;
@@ -226,19 +287,37 @@ var
   Nick, IPv6: string;
   Port: Integer;
   AutoConnect: Boolean;
+  Ini: TIniFile;
 begin
-  Nick := FConfig.Nick;
-  IPv6 := FConfig.IPv6;
-  Port := FConfig.Port;
-  AutoConnect := FConfig.AutoConnect;
+  Nick := '';
+  IPv6 := '';
+  Port := 5299;
+  AutoConnect := False;
+  
+  if FileExists(FConfigPath) then
+  begin
+    Ini := TIniFile.Create(FConfigPath);
+    try
+      Nick := Ini.ReadString('User', 'Nick', '');
+      IPv6 := Ini.ReadString('User', 'IPv6', '');
+      Port := Ini.ReadInteger('User', 'Port', 5299);
+      AutoConnect := Ini.ReadBool('Window', 'AutoConnect', False);
+    finally
+      Ini.Free;
+    end;
+  end;
   
   if TLoginDialog.Execute(Nick, IPv6, Port, AutoConnect) then
   begin
-    FConfig.Nick := Nick;
-    FConfig.IPv6 := IPv6;
-    FConfig.Port := Port;
-    FConfig.AutoConnect := AutoConnect;
-    FConfig.Save;
+    Ini := TIniFile.Create(FConfigPath);
+    try
+      Ini.WriteString('User', 'Nick', Nick);
+      Ini.WriteString('User', 'IPv6', IPv6);
+      Ini.WriteInteger('User', 'Port', Port);
+      Ini.WriteBool('Window', 'AutoConnect', AutoConnect);
+    finally
+      Ini.Free;
+    end;
 
     if not DoConnect(Nick, IPv6, Port) then
     begin
@@ -272,18 +351,7 @@ begin
       SetConnectedState(True);
       LogMessage('=== Connected as ' + FClient.MyJID + ' on port ' + IntToStr(APort) + ' ===');
 
-      FContactManager := TContactManager.Create(FClient, FConfig.GetContactsFilePath);
-      FContactManager.OnLog := @OnContactLog;
-      FContactManager.LoadContacts;
-
-      FAvatarManager := TAvatarManager.Create(FClient);
-      FAvatarManager.OnLog := @OnAvatarLog;
-
-      if (FConfig.AvatarPath <> '') and FileExists(FConfig.AvatarPath) then
-      begin
-        if FAvatarManager.SetMyAvatar(FConfig.AvatarPath) then
-          LogMessage('Loaded saved avatar: ' + FConfig.AvatarPath);
-      end;
+      FClient.LoadConfig(FConfigPath);
       
       UpdateBuddyList;
       UpdateMyAvatarDisplay;
@@ -312,16 +380,9 @@ end;
 
 procedure TFormMain.DoDisconnect;
 begin
-  if Assigned(FContactManager) then
-  begin
-    FContactManager.SaveContacts;
-    FreeAndNil(FContactManager);
-  end;
-  
-  FreeAndNil(FAvatarManager);
-
   if Assigned(FClient) then
   begin
+    FClient.SaveConfig;
     FClient.Stop;
     FreeAndNil(FClient);
   end;
@@ -333,7 +394,7 @@ begin
   FChatManager.CloseAllTabs;
   FChatManager.ClearAllHistory;
   
-  DrawDefaultAvatar;
+  ImageAvatar.Picture.Bitmap.Assign(FDefaultAvatar);
   UpdateUserInfoLabel;
   
   LogMessage('=== Disconnected ===');
@@ -346,6 +407,15 @@ begin
     DoDisconnect;
     ShowLoginDialog;
   end;
+end;
+
+procedure TFormMain.ButtonToggleLogsClick(Sender: TObject);
+begin
+  MemoLog.Visible := not MemoLog.Visible;
+  if MemoLog.Visible then
+    ButtonToggleLogs.Caption := 'Hide Logs'
+  else
+    ButtonToggleLogs.Caption := 'Show Logs';
 end;
 
 procedure TFormMain.SetConnectedState(Connected: Boolean);
@@ -385,16 +455,6 @@ begin
   MemoLog.Lines.Add('[' + TimeToStr(Now) + '] ' + Message);
 end;
 
-procedure TFormMain.OnContactLog(const Message: string);
-begin
-  LogMessage(Message);
-end;
-
-procedure TFormMain.OnAvatarLog(const Message: string);
-begin
-  LogMessage('[Avatar] ' + Message);
-end;
-
 procedure TFormMain.ButtonAddBuddyClick(Sender: TObject);
 var
   BuddyNick, BuddyIPv6: string;
@@ -406,9 +466,10 @@ begin
   if TAddBuddyDialog.Execute(BuddyNick, BuddyIPv6, BuddyPort) then
   begin
     try
-      FContactManager.AddBuddy(BuddyNick, BuddyIPv6, BuddyPort);
-      FContactManager.SaveContacts;
+      FClient.AddBuddy(BuddyNick, BuddyIPv6, BuddyPort);
+      FClient.SaveConfig;
       UpdateBuddyList;
+      LogMessage('Added buddy: ' + BuddyNick);
     except
       on E: Exception do
         ShowMessage('Error adding buddy: ' + E.Message);
@@ -440,19 +501,37 @@ end;
 
 function TFormMain.GetBuddyNickFromListIndex(Index: Integer): string;
 var
-  ItemText: string;
-  SpacePos: Integer;
+  Buddy: TBarevBuddy;
 begin
   Result := '';
-  if (Index < 0) or (Index >= ListBoxBuddies.Items.Count) then
+  if not Assigned(FClient) then
+    Exit;
+  if (Index < 0) or (Index >= FClient.GetBuddyCount) then
     Exit;
   
-  ItemText := ListBoxBuddies.Items[Index];
-  SpacePos := Pos(' ', ItemText);
-  if SpacePos > 0 then
-    Result := Copy(ItemText, SpacePos + 1, Length(ItemText))
-  else
-    Result := ItemText;
+  Buddy := FClient.GetBuddyByIndex(Index);
+  if Assigned(Buddy) then
+    Result := Buddy.Nick;
+end;
+
+function TFormMain.FindBuddyByNick(const Nick: string): TBarevBuddy;
+var
+  I: Integer;
+  Buddy: TBarevBuddy;
+begin
+  Result := nil;
+  if not Assigned(FClient) then
+    Exit;
+    
+  for I := 0 to FClient.GetBuddyCount - 1 do
+  begin
+    Buddy := FClient.GetBuddyByIndex(I);
+    if Assigned(Buddy) and (Buddy.Nick = Nick) then
+    begin
+      Result := Buddy;
+      Exit;
+    end;
+  end;
 end;
 
 procedure TFormMain.OpenChatWithBuddy(Index: Integer);
@@ -465,7 +544,7 @@ begin
     Exit;
   
   BuddyNick := GetBuddyNickFromListIndex(Index);
-  Buddy := FContactManager.FindBuddyByNick(BuddyNick);
+  Buddy := FindBuddyByNick(BuddyNick);
   
   if Assigned(Buddy) then
   begin
@@ -526,7 +605,7 @@ begin
                 mtConfirmation, [mbYes, mbNo], 0) <> mrYes then
     Exit;
   
-  Buddy := FContactManager.FindBuddyByNick(BuddyNick);
+  Buddy := FindBuddyByNick(BuddyNick);
   if not Assigned(Buddy) then
   begin
     ShowMessage('Could not find buddy');
@@ -551,9 +630,9 @@ begin
       end;
     end;
     
-    if FContactManager.RemoveBuddy(Buddy.JID) then
+    if FClient.RemoveBuddy(Buddy.JID) then
     begin
-      FContactManager.SaveContacts;
+      FClient.SaveConfig;
       UpdateBuddyList;
       LogMessage('Removed buddy: ' + BuddyNick);
     end
@@ -580,10 +659,13 @@ begin
   end;
   
   BuddyNick := GetBuddyNickFromListIndex(FRightClickIndex);
-  Buddy := FContactManager.FindBuddyByNick(BuddyNick);
+  Buddy := FindBuddyByNick(BuddyNick);
   
   if Assigned(Buddy) then
-    FAvatarManager.RequestBuddyAvatar(Buddy.JID);
+  begin
+    FClient.RequestBuddyAvatar(Buddy.JID);
+    LogMessage('Requested avatar from ' + BuddyNick);
+  end;
 end;
 
 procedure TFormMain.MenuItemSetAvatarClick(Sender: TObject);
@@ -593,10 +675,11 @@ begin
   
   if OpenDialogAvatar.Execute then
   begin
-    if FAvatarManager.SetMyAvatar(OpenDialogAvatar.FileName) then
+    if FClient.LoadMyAvatar(OpenDialogAvatar.FileName) then
     begin
-      FConfig.AvatarPath := OpenDialogAvatar.FileName;
+      FClient.SaveConfig;
       UpdateMyAvatarDisplay;
+      LogMessage('Avatar set: ' + OpenDialogAvatar.FileName);
     end;
   end;
 end;
@@ -606,9 +689,10 @@ begin
   if not FConnected then
     Exit;
   
-  FAvatarManager.ClearMyAvatar;
-  FConfig.AvatarPath := '';
-  DrawDefaultAvatar;
+  FClient.ClearMyAvatar;
+  FClient.SaveConfig;
+  ImageAvatar.Picture.Bitmap.Assign(FDefaultAvatar);
+  LogMessage('Avatar cleared');
 end;
 
 procedure TFormMain.ImageAvatarClick(Sender: TObject);
@@ -639,8 +723,8 @@ begin
     
     TabSheet := FChatManager.GetOrCreateTab(FCurrentBuddy.Nick, FCurrentBuddy.JID);
     UpdateTabCaption(FCurrentBuddy.Nick, FCurrentBuddy.Status, False);
-    FChatManager.AddMessageToTab(TabSheet, FConfig.Nick, MessageText, False);
-    FChatManager.SaveMessageToHistory(FCurrentBuddy.JID, FConfig.Nick, MessageText, False);
+    FChatManager.AddMessageToTab(TabSheet, FClient.Nick, MessageText, False);
+    FChatManager.SaveMessageToHistory(FCurrentBuddy.JID, FClient.Nick, MessageText, False);
     
     MemoMessage.Clear;
     MemoMessage.SetFocus;
@@ -656,6 +740,72 @@ begin
   begin
     Key := 0;
     ButtonSendClick(Sender);
+  end;
+end;
+
+procedure TFormMain.ListBoxBuddiesDrawItem(Control: TWinControl; Index: Integer;
+  ARect: TRect; State: TOwnerDrawState);
+var
+  Buddy: TBarevBuddy;
+  StatusIcon: string;
+  TextX, TextY, AvatarX, AvatarY: Integer;
+  AvatarRect: TRect;
+  TempBmp: TBitmap;
+  TempPic: TPicture;
+begin
+  if not Assigned(FClient) then
+    Exit;
+  if (Index < 0) or (Index >= FClient.GetBuddyCount) then
+    Exit;
+    
+  Buddy := FClient.GetBuddyByIndex(Index);
+  if not Assigned(Buddy) then
+    Exit;
+
+  with ListBoxBuddies.Canvas do
+  begin
+    if odSelected in State then
+    begin
+      Brush.Color := clHighlight;
+      Font.Color := clHighlightText;
+    end
+    else
+    begin
+      Brush.Color := clWindow;
+      Font.Color := clWindowText;
+    end;
+    
+    FillRect(ARect);
+    
+    StatusIcon := StatusToIcon(Buddy.Status);
+    TextX := ARect.Left + 4;
+    TextY := ARect.Top + (ARect.Height - TextHeight(StatusIcon)) div 2;
+    TextOut(TextX, TextY, StatusIcon + ' ' + Buddy.Nick);
+    
+    AvatarX := ARect.Right - AVATAR_SIZE - 4;
+    AvatarY := ARect.Top + (ARect.Height - AVATAR_SIZE) div 2;
+    AvatarRect := Rect(AvatarX, AvatarY, AvatarX + AVATAR_SIZE, AvatarY + AVATAR_SIZE);
+    
+    if (Buddy.AvatarPath <> '') and FileExists(Buddy.AvatarPath) then
+    begin
+      TempPic := TPicture.Create;
+      try
+        try
+          TempPic.LoadFromFile(Buddy.AvatarPath);
+          StretchDraw(AvatarRect, TempPic.Graphic);
+        except
+          StretchDraw(AvatarRect, FDefaultAvatar);
+        end;
+      finally
+        TempPic.Free;
+      end;
+    end
+    else
+      StretchDraw(AvatarRect, FDefaultAvatar);
+    
+    Pen.Color := clGray;
+    Brush.Style := bsClear;
+    Rectangle(AvatarRect);
   end;
 end;
 
@@ -681,23 +831,16 @@ end;
 procedure TFormMain.ListBoxBuddiesMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
 var
   Index: Integer;
-  BuddyNick: string;
   Buddy: TBarevBuddy;
 begin
   Index := ListBoxBuddies.ItemAtPos(Point(X, Y), True);
   if Index >= 0 then
   begin
-    BuddyNick := GetBuddyNickFromListIndex(Index);
-    if Assigned(FContactManager) then
-    begin
-      Buddy := FContactManager.FindBuddyByNick(BuddyNick);
-      if Assigned(Buddy) then
-        ListBoxBuddies.Hint := BuddyNick + ' - ' + StatusToDisplayString(Buddy.Status)
-      else
-        ListBoxBuddies.Hint := BuddyNick;
-    end
+    Buddy := FClient.GetBuddyByIndex(Index);
+    if Assigned(Buddy) then
+      ListBoxBuddies.Hint := Buddy.Nick + ' - ' + StatusToDisplayString(Buddy.Status)
     else
-      ListBoxBuddies.Hint := BuddyNick;
+      ListBoxBuddies.Hint := '';
   end
   else
     ListBoxBuddies.Hint := '';
@@ -748,26 +891,58 @@ begin
   TabSheet.Caption := NewCaption;
 end;
 
+procedure TFormMain.PageControlChatsChange(Sender: TObject);
+var
+  TabSheet: TTabSheet;
+  TabCaption: string;
+  I: Integer;
+  Buddy: TBarevBuddy;
+begin
+  TabSheet := PageControlChats.ActivePage;
+  if not Assigned(TabSheet) then
+  begin
+    FCurrentBuddy := nil;
+    Exit;
+  end;
+  
+  TabCaption := TabSheet.Caption;
+  
+  if Assigned(FClient) then
+  begin
+    for I := 0 to FClient.GetBuddyCount - 1 do
+    begin
+      Buddy := FClient.GetBuddyByIndex(I);
+      if Assigned(Buddy) and (Pos(Buddy.Nick, TabCaption) > 0) then
+      begin
+        FCurrentBuddy := Buddy;
+        ButtonSend.Enabled := True;
+        MemoMessage.Enabled := True;
+        Exit;
+      end;
+    end;
+  end;
+  
+  FCurrentBuddy := nil;
+end;
+
 procedure TFormMain.PageControlChatsCloseTabClicked(Sender: TObject);
 var
   TabSheet: TTabSheet;
   TabCaption: string;
   I: Integer;
   Buddy: TBarevBuddy;
-  BuddyCount: Integer;
 begin
   if PageControlChats.ActivePage <> nil then
   begin
     TabSheet := PageControlChats.ActivePage;
     TabCaption := TabSheet.Caption;
     
-    if Assigned(FCurrentBuddy) then
+    if Assigned(FCurrentBuddy) and Assigned(FClient) then
     begin
-      BuddyCount := FContactManager.GetBuddyCount;
-      for I := 0 to BuddyCount - 1 do
+      for I := 0 to FClient.GetBuddyCount - 1 do
       begin
-        Buddy := FContactManager.GetBuddyByIndex(I);
-        if Pos(Buddy.Nick, TabCaption) > 0 then
+        Buddy := FClient.GetBuddyByIndex(I);
+        if Assigned(Buddy) and (Pos(Buddy.Nick, TabCaption) > 0) then
         begin
           if FCurrentBuddy.JID = Buddy.JID then
           begin
@@ -841,26 +1016,25 @@ end;
 procedure TFormMain.UpdateBuddyList;
 var
   I: Integer;
-  Buddy: TBarevBuddy;
   BuddyCount: Integer;
-  DisplayText: string;
 begin
-  ListBoxBuddies.Clear;
-  
-  if not Assigned(FContactManager) then
-  begin
-    LabelBuddies.Caption := 'Buddies (0)';
-    Exit;
-  end;
-  
-  BuddyCount := FContactManager.GetBuddyCount;
-  LabelBuddies.Caption := 'Buddies (' + IntToStr(BuddyCount) + ')';
-  
-  for I := 0 to BuddyCount - 1 do
-  begin
-    Buddy := FContactManager.GetBuddyByIndex(I);
-    DisplayText := StatusToIcon(Buddy.Status) + ' ' + Buddy.Nick;
-    ListBoxBuddies.Items.Add(DisplayText);
+  ListBoxBuddies.Items.BeginUpdate;
+  try
+    ListBoxBuddies.Clear;
+    
+    if not Assigned(FClient) then
+    begin
+      LabelBuddies.Caption := 'Buddies (0)';
+      Exit;
+    end;
+    
+    BuddyCount := FClient.GetBuddyCount;
+    LabelBuddies.Caption := 'Buddies (' + IntToStr(BuddyCount) + ')';
+    
+    for I := 0 to BuddyCount - 1 do
+      ListBoxBuddies.Items.Add(IntToStr(I));
+  finally
+    ListBoxBuddies.Items.EndUpdate;
   end;
 end;
 
@@ -868,20 +1042,20 @@ procedure TFormMain.UpdateMyAvatarDisplay;
 var
   AvatarPath: string;
 begin
-  if not Assigned(FAvatarManager) then
+  if not Assigned(FClient) or not Assigned(FClient.AvatarManager) then
     Exit;
   
-  AvatarPath := FAvatarManager.GetMyAvatarPath;
+  AvatarPath := FClient.AvatarManager.MyAvatarPath;
   if (AvatarPath <> '') and FileExists(AvatarPath) then
   begin
     try
       ImageAvatar.Picture.LoadFromFile(AvatarPath);
     except
-      DrawDefaultAvatar;
+      ImageAvatar.Picture.Bitmap.Assign(FDefaultAvatar);
     end;
   end
   else
-    DrawDefaultAvatar;
+    ImageAvatar.Picture.Bitmap.Assign(FDefaultAvatar);
 end;
 
 end.
