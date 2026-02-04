@@ -54,7 +54,9 @@ https://github.com/user-attachments/assets/d9de5b59-ab5b-4d9a-a85c-a9dde32503db
    - Press Enter or click "Send" to send the message
    - Messages appear in the chat window with timestamps
 
-
+<picture>
+    <img alt="screenshot" src="media/screenshot.png" />
+</picture>
 
 ## Configuration and Persistence
 

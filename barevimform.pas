@@ -124,6 +124,35 @@ const
   BUDDY_ITEM_HEIGHT = 40;
   AVATAR_SIZE = 32;
 
+function DetermineConfigFilePath: string;
+var
+  I: Integer;
+  ConfigParam: string;
+begin
+  ConfigParam := '';
+
+  for I := 1 to ParamCount do
+  begin
+    if Pos('--config=', ParamStr(I)) = 1 then
+    begin
+      ConfigParam := Copy(ParamStr(I), 10, Length(ParamStr(I)));
+      Break;
+    end;
+  end;
+  
+  if ConfigParam <> '' then
+  begin
+    Result := ConfigParam;
+    ForceDirectories(ExtractFileDir(Result));
+  end
+  else
+  begin
+    Result := GetUserDir + '.barev' + PathDelim + 'barev.ini';
+    if not DirectoryExists(GetUserDir + '.barev') then
+      ForceDirectories(GetUserDir + '.barev');
+  end;
+end;
+
 { TFormMain }
 
 procedure TFormMain.CreateDefaultAvatar;
@@ -194,9 +223,7 @@ begin
 
   CreateDefaultAvatar;
   
-  FConfigPath := GetUserDir + '.barev' + PathDelim + 'barev.ini';
-  if not DirectoryExists(GetUserDir + '.barev') then
-    ForceDirectories(GetUserDir + '.barev');
+  FConfigPath := DetermineConfigFilePath;
 
   FChatManager := TChatTabManager.Create(PageControlChats);
 
@@ -262,12 +289,48 @@ begin
 end;
 
 procedure TFormMain.FormShow(Sender: TObject);
+var
+  Nick, IPv6: string;
+  Port: Integer;
+  AutoConnect: Boolean;
+  Ini: TIniFile;
 begin
   if FFirstShow then
   begin
     FFirstShow := False;
     Application.ProcessMessages;
-    ShowLoginDialog;
+    
+    Nick := '';
+    IPv6 := '';
+    Port := 5299;
+    AutoConnect := False;
+    
+    if FileExists(FConfigPath) then
+    begin
+      Ini := TIniFile.Create(FConfigPath);
+      try
+        Nick := Ini.ReadString('User', 'Nick', '');
+        IPv6 := Ini.ReadString('User', 'IPv6', '');
+        Port := Ini.ReadInteger('User', 'Port', 5299);
+        AutoConnect := Ini.ReadBool('Window', 'AutoConnect', False);
+      finally
+        Ini.Free;
+      end;
+    end;
+    
+    if AutoConnect and (Nick <> '') and (IPv6 <> '') then
+    begin
+      LogMessage('Auto-connecting...');
+      if not DoConnect(Nick, IPv6, Port) then
+      begin
+        LogMessage('Auto-connect failed, showing login dialog');
+        ShowLoginDialog;
+      end;
+    end
+    else
+    begin
+      ShowLoginDialog;
+    end;
   end;
 end;
 
