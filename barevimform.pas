@@ -37,6 +37,8 @@ type
     Splitter1: TSplitter;
     Timer1: TTimer;
     PopupMenuBuddy: TPopupMenu;
+    MenuItemOpenChat: TMenuItem;
+    MenuItemSeparator0: TMenuItem;
     MenuItemRemoveBuddy: TMenuItem;
     MenuItemSeparator1: TMenuItem;
     MenuItemRequestAvatar: TMenuItem;
@@ -44,6 +46,7 @@ type
     procedure ButtonAddBuddyClick(Sender: TObject);
     procedure ButtonDisconnectClick(Sender: TObject);
     procedure ComboBoxStatusChange(Sender: TObject);
+    procedure MenuItemOpenChatClick(Sender: TObject);
     procedure MenuItemRemoveBuddyClick(Sender: TObject);
     procedure MenuItemRequestAvatarClick(Sender: TObject);
     procedure MenuItemSetAvatarClick(Sender: TObject);
@@ -55,6 +58,9 @@ type
     procedure FormShow(Sender: TObject);
     procedure ImageAvatarClick(Sender: TObject);
     procedure ListBoxBuddiesDblClick(Sender: TObject);
+    procedure ListBoxBuddiesContextPopup(Sender: TObject; MousePos: TPoint;
+      var Handled: Boolean);
+    procedure ListBoxBuddiesMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
     procedure PageControlChatsCloseTabClicked(Sender: TObject);
     procedure Timer1Timer(Sender: TObject);
   private
@@ -62,6 +68,7 @@ type
     FConnected: Boolean;
     FCurrentBuddy: TBarevBuddy;
     FFirstShow: Boolean;
+    FRightClickIndex: Integer;
 
     FConfig: TBarevConfig;
     FChatManager: TChatTabManager;
@@ -86,6 +93,10 @@ type
     procedure SetConnectedState(Connected: Boolean);
     procedure LogMessage(const Message: string);
     procedure DrawDefaultAvatar;
+    function GetBuddyNickFromListIndex(Index: Integer): string;
+    procedure UpdateTabCaption(const BuddyNick: string; Status: TBuddyStatus; IsTyping: Boolean);
+    function FindTabByBuddyNick(const BuddyNick: string): TTabSheet;
+    procedure OpenChatWithBuddy(Index: Integer);
   public
   end;
 
@@ -138,6 +149,7 @@ begin
   FClient := nil;
   FCurrentBuddy := nil;
   FFirstShow := True;
+  FRightClickIndex := -1;
 
   ConfigPath := DetermineConfigFilePath;
   FConfig := TBarevConfig.Create(ConfigPath);
@@ -159,6 +171,8 @@ begin
   Height := FConfig.WindowHeight;
   
   MemoLog.ReadOnly := True;
+  
+  ListBoxBuddies.ShowHint := True;
 
   DrawDefaultAvatar;
 
@@ -424,9 +438,73 @@ begin
     LogMessage('Failed to change status');
 end;
 
+function TFormMain.GetBuddyNickFromListIndex(Index: Integer): string;
+var
+  ItemText: string;
+  SpacePos: Integer;
+begin
+  Result := '';
+  if (Index < 0) or (Index >= ListBoxBuddies.Items.Count) then
+    Exit;
+  
+  ItemText := ListBoxBuddies.Items[Index];
+  SpacePos := Pos(' ', ItemText);
+  if SpacePos > 0 then
+    Result := Copy(ItemText, SpacePos + 1, Length(ItemText))
+  else
+    Result := ItemText;
+end;
+
+procedure TFormMain.OpenChatWithBuddy(Index: Integer);
+var
+  BuddyNick: string;
+  Buddy: TBarevBuddy;
+  TabSheet: TTabSheet;
+begin
+  if Index < 0 then
+    Exit;
+  
+  BuddyNick := GetBuddyNickFromListIndex(Index);
+  Buddy := FContactManager.FindBuddyByNick(BuddyNick);
+  
+  if Assigned(Buddy) then
+  begin
+    FCurrentBuddy := Buddy;
+    
+    TabSheet := FChatManager.GetOrCreateTab(Buddy.Nick, Buddy.JID);
+    UpdateTabCaption(Buddy.Nick, Buddy.Status, False);
+    PageControlChats.ActivePage := TabSheet;
+    
+    LogMessage('Opened chat with: ' + FCurrentBuddy.Nick);
+    
+    try
+      FClient.ConnectToBuddy(FCurrentBuddy.JID);
+      
+      ButtonSend.Enabled := True;
+      MemoMessage.Enabled := True;
+      MemoMessage.SetFocus;
+      
+      LogMessage('Connecting to: ' + FCurrentBuddy.Nick);
+    except
+      on E: Exception do
+        ShowMessage('Error connecting to buddy: ' + E.Message);
+    end;
+  end;
+end;
+
+procedure TFormMain.MenuItemOpenChatClick(Sender: TObject);
+begin
+  if not FConnected then
+    Exit;
+  
+  if FRightClickIndex < 0 then
+    Exit;
+  
+  OpenChatWithBuddy(FRightClickIndex);
+end;
+
 procedure TFormMain.MenuItemRemoveBuddyClick(Sender: TObject);
 var
-  Index: Integer;
   BuddyNick: string;
   Buddy: TBarevBuddy;
   TabSheet: TTabSheet;
@@ -435,14 +513,13 @@ begin
   if not FConnected then
     Exit;
   
-  Index := ListBoxBuddies.ItemIndex;
-  if Index < 0 then
+  if FRightClickIndex < 0 then
   begin
     ShowMessage('Please select a buddy to remove');
     Exit;
   end;
   
-  BuddyNick := Copy(ListBoxBuddies.Items[Index], 1, Pos(' ', ListBoxBuddies.Items[Index]) - 1);
+  BuddyNick := GetBuddyNickFromListIndex(FRightClickIndex);
   
   if MessageDlg('Remove Buddy',
                 'Are you sure you want to remove ' + BuddyNick + '?',
@@ -466,7 +543,7 @@ begin
     
     for I := 0 to PageControlChats.PageCount - 1 do
     begin
-      if PageControlChats.Pages[I].Caption = BuddyNick then
+      if Pos(BuddyNick, PageControlChats.Pages[I].Caption) > 0 then
       begin
         TabSheet := PageControlChats.Pages[I];
         FChatManager.CloseTab(TabSheet);
@@ -490,21 +567,19 @@ end;
 
 procedure TFormMain.MenuItemRequestAvatarClick(Sender: TObject);
 var
-  Index: Integer;
   BuddyNick: string;
   Buddy: TBarevBuddy;
 begin
   if not FConnected then
     Exit;
   
-  Index := ListBoxBuddies.ItemIndex;
-  if Index < 0 then
+  if FRightClickIndex < 0 then
   begin
     ShowMessage('Please select a buddy');
     Exit;
   end;
   
-  BuddyNick := Copy(ListBoxBuddies.Items[Index], 1, Pos(' ', ListBoxBuddies.Items[Index]) - 1);
+  BuddyNick := GetBuddyNickFromListIndex(FRightClickIndex);
   Buddy := FContactManager.FindBuddyByNick(BuddyNick);
   
   if Assigned(Buddy) then
@@ -563,6 +638,7 @@ begin
     FClient.SendMessage(FCurrentBuddy.JID, MessageText);
     
     TabSheet := FChatManager.GetOrCreateTab(FCurrentBuddy.Nick, FCurrentBuddy.JID);
+    UpdateTabCaption(FCurrentBuddy.Nick, FCurrentBuddy.Status, False);
     FChatManager.AddMessageToTab(TabSheet, FConfig.Nick, MessageText, False);
     FChatManager.SaveMessageToHistory(FCurrentBuddy.JID, FConfig.Nick, MessageText, False);
     
@@ -583,59 +659,125 @@ begin
   end;
 end;
 
-procedure TFormMain.ListBoxBuddiesDblClick(Sender: TObject);
+procedure TFormMain.ListBoxBuddiesContextPopup(Sender: TObject; MousePos: TPoint;
+  var Handled: Boolean);
+var
+  Index: Integer;
+begin
+  Index := ListBoxBuddies.ItemAtPos(MousePos, True);
+  if Index >= 0 then
+  begin
+    FRightClickIndex := Index;
+    ListBoxBuddies.ItemIndex := Index;
+    Handled := False;
+  end
+  else
+  begin
+    FRightClickIndex := -1;
+    Handled := True;
+  end;
+end;
+
+procedure TFormMain.ListBoxBuddiesMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
 var
   Index: Integer;
   BuddyNick: string;
   Buddy: TBarevBuddy;
-  TabSheet: TTabSheet;
 begin
-  Index := ListBoxBuddies.ItemIndex;
-  if Index < 0 then
-    Exit;
-  
-  BuddyNick := Copy(ListBoxBuddies.Items[Index], 1, Pos(' ', ListBoxBuddies.Items[Index]) - 1);
-  Buddy := FContactManager.FindBuddyByNick(BuddyNick);
-  
-  if Assigned(Buddy) then
+  Index := ListBoxBuddies.ItemAtPos(Point(X, Y), True);
+  if Index >= 0 then
   begin
-    FCurrentBuddy := Buddy;
-    
-    TabSheet := FChatManager.GetOrCreateTab(Buddy.Nick, Buddy.JID);
-    PageControlChats.ActivePage := TabSheet;
-    
-    LogMessage('Opened chat with: ' + FCurrentBuddy.Nick);
-    
-    try
-      FClient.ConnectToBuddy(FCurrentBuddy.JID);
-      
-      ButtonSend.Enabled := True;
-      MemoMessage.Enabled := True;
-      MemoMessage.SetFocus;
-      
-      LogMessage('Connecting to: ' + FCurrentBuddy.Nick);
-    except
-      on E: Exception do
-        ShowMessage('Error connecting to buddy: ' + E.Message);
+    BuddyNick := GetBuddyNickFromListIndex(Index);
+    if Assigned(FContactManager) then
+    begin
+      Buddy := FContactManager.FindBuddyByNick(BuddyNick);
+      if Assigned(Buddy) then
+        ListBoxBuddies.Hint := BuddyNick + ' - ' + StatusToDisplayString(Buddy.Status)
+      else
+        ListBoxBuddies.Hint := BuddyNick;
+    end
+    else
+      ListBoxBuddies.Hint := BuddyNick;
+  end
+  else
+    ListBoxBuddies.Hint := '';
+end;
+
+procedure TFormMain.ListBoxBuddiesDblClick(Sender: TObject);
+begin
+  OpenChatWithBuddy(ListBoxBuddies.ItemIndex);
+end;
+
+function TFormMain.FindTabByBuddyNick(const BuddyNick: string): TTabSheet;
+var
+  I: Integer;
+  TabCaption: string;
+begin
+  Result := nil;
+  for I := 0 to PageControlChats.PageCount - 1 do
+  begin
+    TabCaption := PageControlChats.Pages[I].Caption;
+    if (TabCaption = BuddyNick) or
+       (Pos(StatusToIcon(bsOffline) + ' ' + BuddyNick, TabCaption) > 0) or
+       (Pos(StatusToIcon(bsAvailable) + ' ' + BuddyNick, TabCaption) > 0) or
+       (Pos(StatusToIcon(bsAway) + ' ' + BuddyNick, TabCaption) > 0) or
+       (Pos(StatusToIcon(bsExtendedAway) + ' ' + BuddyNick, TabCaption) > 0) or
+       (Pos(StatusToIcon(bsDoNotDisturb) + ' ' + BuddyNick, TabCaption) > 0) or
+       (Pos(BuddyNick + ' (typing...)', TabCaption) > 0) then
+    begin
+      Result := PageControlChats.Pages[I];
+      Exit;
     end;
   end;
+end;
+
+procedure TFormMain.UpdateTabCaption(const BuddyNick: string; Status: TBuddyStatus; IsTyping: Boolean);
+var
+  TabSheet: TTabSheet;
+  NewCaption: string;
+begin
+  TabSheet := FindTabByBuddyNick(BuddyNick);
+  if not Assigned(TabSheet) then
+    Exit;
+  
+  if IsTyping then
+    NewCaption := StatusToIcon(Status) + ' ' + BuddyNick + ' (typing...)'
+  else
+    NewCaption := StatusToIcon(Status) + ' ' + BuddyNick;
+  
+  TabSheet.Caption := NewCaption;
 end;
 
 procedure TFormMain.PageControlChatsCloseTabClicked(Sender: TObject);
 var
   TabSheet: TTabSheet;
   TabCaption: string;
+  I: Integer;
+  Buddy: TBarevBuddy;
+  BuddyCount: Integer;
 begin
   if PageControlChats.ActivePage <> nil then
   begin
     TabSheet := PageControlChats.ActivePage;
     TabCaption := TabSheet.Caption;
     
-    if Assigned(FCurrentBuddy) and (TabCaption = FCurrentBuddy.Nick) then
+    if Assigned(FCurrentBuddy) then
     begin
-      FCurrentBuddy := nil;
-      ButtonSend.Enabled := False;
-      MemoMessage.Enabled := False;
+      BuddyCount := FContactManager.GetBuddyCount;
+      for I := 0 to BuddyCount - 1 do
+      begin
+        Buddy := FContactManager.GetBuddyByIndex(I);
+        if Pos(Buddy.Nick, TabCaption) > 0 then
+        begin
+          if FCurrentBuddy.JID = Buddy.JID then
+          begin
+            FCurrentBuddy := nil;
+            ButtonSend.Enabled := False;
+            MemoMessage.Enabled := False;
+          end;
+          Break;
+        end;
+      end;
     end;
     
     FChatManager.CloseTab(TabSheet);
@@ -663,6 +805,7 @@ begin
   FChatManager.SaveMessageToHistory(Buddy.JID, Buddy.Nick, MessageText, True);
   
   TabSheet := FChatManager.GetOrCreateTab(Buddy.Nick, Buddy.JID);
+  UpdateTabCaption(Buddy.Nick, Buddy.Status, False);
   FChatManager.AddMessageToTab(TabSheet, Buddy.Nick, MessageText, True);
   
   if not Assigned(FCurrentBuddy) or (FCurrentBuddy.JID <> Buddy.JID) then
@@ -670,8 +813,14 @@ begin
 end;
 
 procedure TFormMain.OnBuddyStatus(Buddy: TBarevBuddy; OldStatus, NewStatus: TBuddyStatus);
+var
+  TabSheet: TTabSheet;
 begin
   UpdateBuddyList;
+  
+  TabSheet := FindTabByBuddyNick(Buddy.Nick);
+  if Assigned(TabSheet) then
+    UpdateTabCaption(Buddy.Nick, NewStatus, False);
   
   if NewStatus <> bsOffline then
     LogMessage('Buddy ' + Buddy.Nick + ': ' + StatusToDisplayString(NewStatus))
@@ -680,15 +829,8 @@ begin
 end;
 
 procedure TFormMain.OnTypingNotification(Buddy: TBarevBuddy; IsTyping: Boolean);
-var
-  TabSheet: TTabSheet;
 begin
-  TabSheet := FChatManager.GetOrCreateTab(Buddy.Nick, Buddy.JID);
-  
-  if IsTyping then
-    TabSheet.Caption := Buddy.Nick + ' (typing...)'
-  else
-    TabSheet.Caption := Buddy.Nick;
+  UpdateTabCaption(Buddy.Nick, Buddy.Status, IsTyping);
 end;
 
 procedure TFormMain.OnLog(const LogLevel, Message: string);
@@ -699,9 +841,9 @@ end;
 procedure TFormMain.UpdateBuddyList;
 var
   I: Integer;
-  Status: string;
   Buddy: TBarevBuddy;
   BuddyCount: Integer;
+  DisplayText: string;
 begin
   ListBoxBuddies.Clear;
   
@@ -717,8 +859,8 @@ begin
   for I := 0 to BuddyCount - 1 do
   begin
     Buddy := FContactManager.GetBuddyByIndex(I);
-    Status := StatusToIcon(Buddy.Status) + ' ' + StatusToDisplayString(Buddy.Status);
-    ListBoxBuddies.Items.Add(Buddy.Nick + ' ' + Status);
+    DisplayText := StatusToIcon(Buddy.Status) + ' ' + Buddy.Nick;
+    ListBoxBuddies.Items.Add(DisplayText);
   end;
 end;
 

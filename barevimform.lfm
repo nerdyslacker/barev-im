@@ -95,10 +95,14 @@ object FormMain: TFormMain
       Width = 198
       Align = alClient
       ItemHeight = 0
+      ParentShowHint = False
       PopupMenu = PopupMenuBuddy
+      ShowHint = True
       TabOrder = 0
       TopIndex = -1
+      OnContextPopup = ListBoxBuddiesContextPopup
       OnDblClick = ListBoxBuddiesDblClick
+      OnMouseMove = ListBoxBuddiesMouseMove
     end
     object ButtonAddBuddy: TButton
       Left = 1
@@ -190,6 +194,13 @@ object FormMain: TFormMain
   object PopupMenuBuddy: TPopupMenu
     Left = 112
     Top = 200
+    object MenuItemOpenChat: TMenuItem
+      Caption = 'Open Chat'
+      OnClick = MenuItemOpenChatClick
+    end
+    object MenuItemSeparator0: TMenuItem
+      Caption = '-'
+    end
     object MenuItemRemoveBuddy: TMenuItem
       Caption = 'Remove Buddy'
       OnClick = MenuItemRemoveBuddyClick

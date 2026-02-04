@@ -16,21 +16,19 @@ type
     FChatHistory: TFPHashList;
     
     function FindTabByCaption(const Caption: string): TTabSheet;
+    function FindTabByNick(const BuddyNick: string): TTabSheet;
   public
     constructor Create(APageControl: TPageControl);
     destructor Destroy; override;
     
-    { Tab management }
     function GetOrCreateTab(const BuddyNick, BuddyJID: string): TTabSheet;
     procedure CloseTab(TabSheet: TTabSheet);
     procedure CloseAllTabs;
     function GetTabRichMemo(TabSheet: TTabSheet): TRichMemo;
     
-    { Message display }
     procedure AddMessageToTab(TabSheet: TTabSheet; const Nick, MessageText: string; 
       Incoming: Boolean);
     
-    { History management }
     procedure SaveMessageToHistory(const BuddyJID, Nick, MessageText: string; 
       Incoming: Boolean);
     procedure LoadHistoryToTab(TabSheet: TTabSheet; const BuddyJID: string);
@@ -72,12 +70,29 @@ begin
   end;
 end;
 
+function TChatTabManager.FindTabByNick(const BuddyNick: string): TTabSheet;
+var
+  I: Integer;
+  TabCaption: string;
+begin
+  Result := nil;
+  for I := 0 to FPageControl.PageCount - 1 do
+  begin
+    TabCaption := FPageControl.Pages[I].Caption;
+    if (Pos(BuddyNick, TabCaption) > 0) then
+    begin
+      Result := FPageControl.Pages[I];
+      Exit;
+    end;
+  end;
+end;
+
 function TChatTabManager.GetOrCreateTab(const BuddyNick, BuddyJID: string): TTabSheet;
 var
   TabSheet: TTabSheet;
   RichMemo: TRichMemo;
 begin
-  Result := FindTabByCaption(BuddyNick);
+  Result := FindTabByNick(BuddyNick);
   if Assigned(Result) then
     Exit;
 
@@ -85,6 +100,7 @@ begin
   TabSheet.PageControl := FPageControl;
   TabSheet.Caption := BuddyNick;
   TabSheet.Hint := '';
+  TabSheet.Tag := PtrInt(PChar(BuddyJID));
 
   RichMemo := TRichMemo.Create(TabSheet);
   RichMemo.Parent := TabSheet;
