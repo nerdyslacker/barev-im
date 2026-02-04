@@ -10,6 +10,7 @@ object LoginDialog: TLoginDialog
   Position = poScreenCenter
   LCLVersion = '4.4.0.0'
   OnCloseQuery = FormCloseQuery
+  OnCreate = FormCreate
   object PanelTop: TPanel
     Left = 0
     Height = 50
@@ -19,17 +20,25 @@ object LoginDialog: TLoginDialog
     BevelOuter = bvNone
     ClientHeight = 50
     ClientWidth = 450
-    Color = clHighlight
+    Color = clWhite
     ParentBackground = False
     ParentColor = False
     TabOrder = 0
+    object ImageLogo: TImage
+      Left = 10
+      Height = 40
+      Top = 5
+      Width = 40
+      Proportional = True
+      Stretch = True
+    end
     object LabelTitle: TLabel
-      Left = 20
+      Left = 60
       Height = 30
       Top = 10
       Width = 200
-      Caption = '🌐 barev IM'
-      Font.Color = clWhite
+      Caption = 'barev IM'
+      Font.Color = clBlack
       Font.Height = -24
       Font.Style = [fsBold]
       ParentColor = False

@@ -18,13 +18,16 @@ type
     EditNick: TEdit;
     EditIPv6: TEdit;
     EditPort: TEdit;
+    ImageLogo: TImage;
     LabelNick: TLabel;
     LabelIPv6: TLabel;
     LabelPort: TLabel;
     LabelTitle: TLabel;
     PanelTop: TPanel;
     procedure FormCloseQuery(Sender: TObject; var CanClose: Boolean);
+    procedure FormCreate(Sender: TObject);
   private
+    procedure LoadLogo;
   public
     class function Execute(var ANick, AIPv6: string; var APort: Integer; 
       var AAutoConnect: Boolean): Boolean;
@@ -38,6 +41,25 @@ implementation
 {$R *.lfm}
 
 { TLoginDialog }
+
+procedure TLoginDialog.FormCreate(Sender: TObject);
+begin
+  LoadLogo;
+end;
+
+procedure TLoginDialog.LoadLogo;
+var
+  LogoPath: string;
+begin
+  LogoPath := ExtractFilePath(Application.ExeName) + 'logo.png';
+  if FileExists(LogoPath) then
+  begin
+    try
+      ImageLogo.Picture.LoadFromFile(LogoPath);
+    except
+    end;
+  end;
+end;
 
 procedure TLoginDialog.FormCloseQuery(Sender: TObject; var CanClose: Boolean);
 var

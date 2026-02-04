@@ -9,8 +9,6 @@ uses
 
 const
   DEFAULT_PORT = 5299;
-  DEFAULT_NICK = 'mynick';
-  DEFAULT_IPV6 = '201:af82:9f2f:7809::1';
 
   COLOR_INCOMING = clRed;
   COLOR_OUTGOING = clSkyBlue;
@@ -19,7 +17,6 @@ const
   SYMBOL_OUTGOING = '↑';
 
 type
-  { TChatMessage - represents a single chat message }
   TChatMessage = record
     Nick: string;
     Message: string;
@@ -27,14 +24,12 @@ type
     Timestamp: TDateTime;
   end;
   
-  { PChatMessage - pointer to chat message for lists }
   PChatMessage = ^TChatMessage;
 
 function CreateChatMessage(const ANick, AMessage: string; AIncoming: Boolean): TChatMessage;
 function GetMessageSymbol(Incoming: Boolean): string;
 function GetMessageColor(Incoming: Boolean): TColor;
 
-{ Status display helpers }
 function StatusToDisplayString(Status: TBuddyStatus): string;
 function StatusToIcon(Status: TBuddyStatus): string;
 

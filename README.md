@@ -1,5 +1,5 @@
 <div align="center">
-<a href="https://github.com/nerdyslacker/barev-im"><img src="barevim.png" width="120"/></a>
+<a href="https://github.com/nerdyslacker/barev-im"><img src="media/barevim.png" width="120"/></a>
 </div>
 <h1 align="center">Barev IM [ընկեր]</h1>
 
@@ -15,33 +15,15 @@
 
 </div>
 
+## Demo
+
+https://github.com/user-attachments/assets/d9de5b59-ab5b-4d9a-a85c-a9dde32503db
+
 ## Requirements
 
 - Lazarus IDE (or Free Pascal Compiler with LCL)
 - barev-pascal library (https://github.com/norayr/barev-pascal)
 - Yggdrasil network connection
-
-## Building
-
-### Using Lazarus IDE
-
-1. Open Lazarus IDE
-2. Open the project file: `File -> Open -> barevim.lpr`
-3. Add the Barev units to your project search path:
-   - `Project -> Project Options -> Compiler Options -> Paths`
-   - Add the path to the Barev library units
-4. Build: `Run -> Build` (or press Shift+F9)
-5. Run: `Run -> Run` (or press F9)
-
-### Using Command Line
-
-```bash
-# Make sure the Barev units are in your unit search path
-lazbuild barevim.lpr
-
-# Or with fpc directly
-fpc -Fu/path/to/barev/units barevim.lpr
-```
 
 ### Getting Started
 
@@ -72,43 +54,55 @@ fpc -Fu/path/to/barev/units barevim.lpr
    - Press Enter or click "Send" to send the message
    - Messages appear in the chat window with timestamps
 
-<picture>
-    <img alt="screenshot" src="media/login.png" />
-</picture>
 
-<picture>
-    <img alt="screenshot" src="media/add_buddy.png" />
-</picture>
 
 ## Configuration and Persistence
 
 The application automatically saves your settings to a configuration file:
 
-**Linux/Unix**: `~/.config/barevim/barev.ini`
+**Linux/Unix**: `~/.barev/barev.ini`
 
 ### Configuration File Format
 
 ```ini
 [User]
-Nick=alice
-IPv6=201:af82:9f2f:7809::1
+Nick=nerdyslacker
+IPv6=201:87ec:4df2:51d4:7fdd:d63c:95e4:ed6e
 Port=5299
-AutoConnect=1
+AvatarPath=
 
 [Window]
-Left=100
-Top=100
-Width=800
-Height=600
+AutoConnect=0
+
+[Contact-0]
+Nick=bob
+IPv6=0201:87EC:4DF2:51D4:7FDD:D63C:95E4:ED6E
+Port=5300
+AvatarPath=
+
 ```
 
-and buddy list to the `contact.txt`:
+## Building
 
-```
-bob@201:7a74:aa1e:101a::a1
-charlie@202:baad:cafe:1234::1:5300
-```
+### Using Lazarus IDE
 
+1. Open Lazarus IDE
+2. Open the project file: `File -> Open -> barevim.lpr`
+3. Add the Barev units to your project search path:
+   - `Project -> Project Options -> Compiler Options -> Paths`
+   - Add the path to the Barev library units
+4. Build: `Run -> Build` (or press Shift+F9)
+5. Run: `Run -> Run` (or press F9)
+
+### Using Command Line
+
+```bash
+# Make sure the Barev units are in your unit search path
+lazbuild barevim.lpr
+
+# Or with fpc directly
+fpc -Fu/path/to/barev/units barevim.lpr
+```
 
 ## Credits
 

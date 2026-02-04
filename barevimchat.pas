@@ -60,11 +60,15 @@ end;
 function TChatTabManager.FindTabByCaption(const Caption: string): TTabSheet;
 var
   I: Integer;
+  TabCaption: string;
 begin
   Result := nil;
   for I := 0 to FPageControl.PageCount - 1 do
   begin
-    if FPageControl.Pages[I].Caption = Caption then
+    TabCaption := FPageControl.Pages[I].Caption;
+    if (TabCaption = Caption) or
+       (Pos(' ' + Caption, TabCaption) > 0) or
+       (Pos(Caption + ' (typing...)', TabCaption) > 0) then
     begin
       Result := FPageControl.Pages[I];
       Exit;
